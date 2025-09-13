@@ -41,6 +41,7 @@ html_content = f"""
         <button id="reset-view" title="Reset View (0)">Reset View</button>
         <button id="pan-mode" title="Pan Mode">Toggle Pan</button>
         <button id="toggle-theme" title="Toggle Theme">Toggle Dark Mode</button>
+        <p>Magnifier Zoom: <input type="range" id="magnifier-zoom" min="2" max="10" value="2" title="Adjust magnifier zoom level"></p>
       </details>
       <details open>
         <summary>Calibration</summary>
@@ -88,7 +89,6 @@ html_content = f"""
         <button id="export-json" title="Export JSON data">Export JSON</button>
         <button id="export-csv" title="Export CSV data">Export CSV</button>
         <button id="export-xlsx" title="Export XLSX data">Export XLSX</button>
-        <button id="export-image" title="Export canvas image">Export Image</button>
         <button id="clear-session" title="Clear saved session">Clear Session</button>
         <button id="total-reset" title="Reset all calibration and data">Total Reset</button>
       </details>
@@ -101,10 +101,6 @@ html_content = f"""
         <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
         <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
       </details>
-      <details open>
-        <summary>Points</summary>
-        <div id="point-list"></div>
-      </details>
     </div>
   </div>
   <div id="modal"><div id="modal-content"></div></div>
@@ -113,6 +109,7 @@ html_content = f"""
 </body>
 </html>
 """
+
 # Streamlit UI
 st.title("Graph Digitizer Pro - Streamlit Edition")
 st.markdown("Upload a graph image and digitize points by clicking on the canvas. Calibrate axes, add points, and export data as JSON or CSV.")
