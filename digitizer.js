@@ -247,6 +247,24 @@ function loadImage(dataUrl) {
   };
 }
 
+// Handle image upload
+imageUpload.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      loadImage(ev.target.result);
+    };
+    reader.onerror = () => {
+      showModal('Failed to read the image file. Please try another image.');
+      console.error('FileReader error for file:', file.name);
+    };
+    reader.readAsDataURL(file);
+  } else {
+    showModal('No file selected.');
+  }
+});
+
 /**********************
  * COORDINATE TRANSFORMATIONS
  **********************/
