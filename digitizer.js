@@ -17,6 +17,7 @@ let highlightPath = [], isHighlighting = false;
 let isDraggingPoint = false;
 let highlightWidth = 2; // Default highlight brush width
 let magnifierZoom = 2; // Default magnifier zoom
+let flashPoint = null, flashStart = null; // For new point animation
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels = ['X1', 'X2', 'Y1', 'Y2'];
 
@@ -60,7 +61,7 @@ const statusBar = document.getElementById('status-bar');
 /**********************
  * UTILITIES
  **********************/
-function showModal(msg, withInput = false, callback = null) {
+function showModal(msg, withInput = false, callback = null, showCheckbox = false) {
   const modal = document.getElementById('modal');
   const content = document.getElementById('modal-content');
   content.innerHTML = '';
@@ -74,12 +75,28 @@ function showModal(msg, withInput = false, callback = null) {
     input.style.width = '100%';
     content.appendChild(input);
   }
+  if (showCheckbox) {
+    const checkboxContainer = document.createElement('div');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'dont-show-again';
+    const label = document.createElement('label');
+    label.htmlFor = 'dont-show-again';
+    label.textContent = "Don't show again";
+    checkboxContainer.appendChild(checkbox);
+    checkboxContainer.appendChild(label);
+    content.appendChild(checkboxContainer);
+  }
   const btnContainer = document.createElement('div');
   const okBtn = document.createElement('button');
   okBtn.textContent = 'OK';
   okBtn.onclick = () => {
     modal.style.display = 'none';
-    if (callback) callback(withInput ? document.getElementById('modal-input').value : null);
+    if (callback) {
+      const inputValue = withInput ? document.getElementById('modal-input').value : null;
+      const dontShow = showCheckbox ? document.getElementById('dont-show-again').checked : false;
+      callback(inputValue, dontShow);
+    }
   };
   btnContainer.appendChild(okBtn);
   const cancelBtn = document.createElement('button');
@@ -139,10 +156,29 @@ function loadSession() {
         renameLineBtn.disabled = false;
       }
       draw();
+      if (!localStorage.getItem('seenTutorial')) {
+        showModal(
+          'Welcome to Graph Digitizer Pro!\n1. Upload an image using the "Upload Image" button.\n2. Click "Set Axis Points" and select X1, X2, Y1, Y2.\n3. Enter axis values and click "Calibrate".\n4. Add points or highlight lines (P or H).\n5. Export data as JSON, CSV, or XLSX.',
+          false,
+          (value, dontShow) => {
+            if (dontShow) localStorage.setItem('seenTutorial', 'true');
+          },
+          true
+        );
+      }
     } catch (e) {
       console.error('Failed to load session:', e);
       showModal('Failed to load session. Starting fresh.');
     }
+  } else {
+    showModal(
+      'Welcome to Graph Digitizer Pro!\n1. Upload an image using the "Upload Image" button.\n2. Click "Set Axis Points" and select X1, X2, Y1, Y2.\n3. Enter axis values and click "Calibrate".\n4. Add points or highlight lines (P or H).\n5. Export data as JSON, CSV, or XLSX.',
+      false,
+      (value, dontShow) => {
+        if (dontShow) localStorage.setItem('seenTutorial', 'true');
+      },
+      true
+    );
   }
 }
 
@@ -372,13 +408,15 @@ const draw = debounce(() => {
     }
   }
 
-  // Draw axis points
-  ctx.fillStyle = 'red';
+  // Draw axis points with pulsing effect for active point
   ctx.font = `${12 / zoom}px Arial`;
   axisPoints.forEach((p, i) => {
+    ctx.fillStyle = mode === 'axes' && i === axisPoints.length ? '#ff4444' : 'red';
     ctx.beginPath();
-    ctx.arc(p.x, p.y, 5 / zoom, 0, 2 * Math.PI);
+    const radius = mode === 'axes' && i === axisPoints.length ? 7 / zoom + Math.sin(Date.now() / 200) * 2 / zoom : 5 / zoom;
+    ctx.arc(p.x, p.y, radius, 0, 2 * Math.PI);
     ctx.fill();
+    ctx.fillStyle = mode === 'axes' && i === axisPoints.length ? '#fff' : '#000';
     ctx.fillText(axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom);
   });
 
@@ -396,6 +434,14 @@ const draw = debounce(() => {
       ctx.fill();
     });
   });
+
+  // Draw flashing point for new points
+  if (flashPoint && Date.now() - flashStart < 500) {
+    ctx.fillStyle = 'yellow';
+    ctx.beginPath();
+    ctx.arc(flashPoint.x, flashPoint.y, 5 / zoom, 0, 2 * Math.PI);
+    ctx.fill();
+  }
 
   // Draw highlight path with Catmull-Rom spline
   if (highlightPath.length > 1) {
@@ -478,6 +524,10 @@ canvas.addEventListener('mouseleave', () => {
   statusBar.textContent = `Mode: ${mode}`;
 });
 
+document.getElementById('image-upload-btn').addEventListener('click', () => {
+  imageUpload.click();
+});
+
 imageUpload.addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) {
@@ -551,6 +601,9 @@ canvas.addEventListener('mousedown', e => {
     const { dataX, dataY } = dataCoords;
     console.log(`Adding point: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     lines[currentLineIndex].points.push({ x, y, dataX, dataY });
+    flashPoint = { x, y };
+    flashStart = Date.now();
+    setTimeout(() => { flashPoint = null; draw(); }, 500);
     updatePreview();
     draw();
     saveState();
@@ -618,6 +671,9 @@ canvas.addEventListener('mouseup', e => {
       console.log(`Adding highlight point: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
       lines[currentLineIndex].points.push({ x: p.x, y: p.y, dataX, dataY });
     });
+    flashPoint = spacedPoints[spacedPoints.length - 1];
+    flashStart = Date.now();
+    setTimeout(() => { flashPoint = null; draw(); }, 500);
     highlightPath = [];
     updateLineSelect();
     updatePreview();
@@ -1159,131 +1215,4 @@ undoBtn.addEventListener('click', () => {
     historyIndex--;
     const state = history[historyIndex];
     lines = JSON.parse(JSON.stringify(state.lines));
-    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
-    scaleX = state.scaleX;
-    scaleY = state.scaleY;
-    offsetX = state.offsetX;
-    offsetY = state.offsetY;
-    logX = state.logX;
-    logY = state.logY;
-    isCalibrated = state.isCalibrated;
-    zoom = state.zoom;
-    panX = state.panX;
-    panY = state.panY;
-    showGrid = state.showGrid;
-    mode = state.mode;
-    currentLineIndex = state.currentLineIndex;
-    magnifierZoom = state.magnifierZoom;
-    toggleLogXBtn.classList.toggle('log-active', logX);
-    toggleLogYBtn.classList.toggle('log-active', logY);
-    document.getElementById('magnifier-zoom').value = magnifierZoom;
-    updateLineSelect();
-    updatePreview();
-    updateButtonStates();
-    if (isCalibrated) {
-      addPointBtn.disabled = false;
-      adjustPointBtn.disabled = false;
-      deletePointBtn.disabled = false;
-      highlightLineBtn.disabled = false;
-      clearPointsBtn.disabled = false;
-      sortPointsBtn.disabled = false;
-      newLineBtn.disabled = false;
-      renameLineBtn.disabled = false;
-    } else {
-      addPointBtn.disabled = true;
-      adjustPointBtn.disabled = true;
-      deletePointBtn.disabled = true;
-      highlightLineBtn.disabled = true;
-      clearPointsBtn.disabled = true;
-      sortPointsBtn.disabled = true;
-      newLineBtn.disabled = true;
-      renameLineBtn.disabled = true;
-    }
-    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
-    calibrateBtn.disabled = axisPoints.length !== 4;
-    draw();
-    saveSession();
-  }
-  undoBtn.disabled = historyIndex <= 0;
-  redoBtn.disabled = historyIndex >= history.length - 1;
-});
-
-redoBtn.addEventListener('click', () => {
-  if (historyIndex < history.length - 1) {
-    historyIndex++;
-    const state = history[historyIndex];
-    lines = JSON.parse(JSON.stringify(state.lines));
-    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
-    scaleX = state.scaleX;
-    scaleY = state.scaleY;
-    offsetX = state.offsetX;
-    offsetY = state.offsetY;
-    logX = state.logX;
-    logY = state.logY;
-    isCalibrated = state.isCalibrated;
-    zoom = state.zoom;
-    panX = state.panX;
-    panY = state.panY;
-    showGrid = state.showGrid;
-    mode = state.mode;
-    currentLineIndex = state.currentLineIndex;
-    magnifierZoom = state.magnifierZoom;
-    toggleLogXBtn.classList.toggle('log-active', logX);
-    toggleLogYBtn.classList.toggle('log-active', logY);
-    document.getElementById('magnifier-zoom').value = magnifierZoom;
-    updateLineSelect();
-    updatePreview();
-    updateButtonStates();
-    if (isCalibrated) {
-      addPointBtn.disabled = false;
-      adjustPointBtn.disabled = false;
-      deletePointBtn.disabled = false;
-      highlightLineBtn.disabled = false;
-      clearPointsBtn.disabled = false;
-      sortPointsBtn.disabled = false;
-      newLineBtn.disabled = false;
-      renameLineBtn.disabled = false;
-    } else {
-      addPointBtn.disabled = true;
-      adjustPointBtn.disabled = true;
-      deletePointBtn.disabled = true;
-      highlightLineBtn.disabled = true;
-      clearPointsBtn.disabled = true;
-      sortPointsBtn.disabled = true;
-      newLineBtn.disabled = true;
-      renameLineBtn.disabled = true;
-    }
-    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
-    calibrateBtn.disabled = axisPoints.length !== 4;
-    draw();
-    saveSession();
-  }
-  undoBtn.disabled = historyIndex <= 0;
-  redoBtn.disabled = historyIndex >= history.length - 1;
-});
-
-/**********************
- * INITIALIZATION
- **********************/
-window.addEventListener('resize', () => {
-  if (img.src && img.complete && img.naturalWidth > 0) {
-    canvas.width = Math.min(img.width, window.innerWidth * 0.8);
-    canvas.height = canvas.width * (img.height / img.width);
-    draw();
-  }
-});
-
-if (localStorage.getItem('theme') === 'dark') {
-  document.body.classList.add('dark');
-}
-
-loadSession();
-draw();
-
-const highlightWidthSlider = document.getElementById('highlight-width');
-highlightWidthSlider.addEventListener('input', (e) => {
-  highlightWidth = parseInt(e.target.value);
-  draw();
-});
+    axisPoints
