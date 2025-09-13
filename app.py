@@ -12,15 +12,17 @@ except FileNotFoundError as e:
     st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
     st.stop()
 
-# HTML content embedding CSS, JS, and inline upload button script
-html_content = f"""
+# HTML content with CSS, JS, and inline upload button script
+html_content = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Graph Digitizer Pro</title>
-  <style>{css}</style>
+  <style>
+    {}
+  </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
@@ -142,10 +144,12 @@ html_content = f"""
       });
     });
   </script>
-  <script>{js}</script>
+  <script>
+    {}
+  </script>
 </body>
 </html>
-"""
+""".format(css, js)
 
 # Streamlit UI
 st.title("Graph Digitizer Pro")
