@@ -4,10 +4,14 @@ import base64
 st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 
 # Load CSS and JS from files
-with open("styles.css", "r") as f:
-    css = f.read()
-with open("digitizer.js", "r") as f:
-    js = f.read()
+try:
+    with open("styles.css", "r") as f:
+        css = f.read()
+    with open("digitizer.js", "r") as f:
+        js = f.read()
+except FileNotFoundError as e:
+    st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
+    st.stop()
 
 # HTML content embedding CSS and JS
 html_content = f"""
@@ -114,12 +118,18 @@ st.markdown("Upload a graph image and digitize points by clicking on the canvas.
 # Optional image uploader
 uploaded_image = st.file_uploader("Upload graph image (optional, overrides HTML upload)", type=["png", "jpg", "jpeg", "gif", "bmp"])
 if uploaded_image:
-    data_url = f"data:image/{uploaded_image.type.split('/')[-1]};base64,{base64.b64encode(uploaded_image.read()).decode()}"
-    # Inject image into JS by adding a script to set img.src
-    html_content = html_content.replace(
-        '<script>',
-        f'<script>document.addEventListener("DOMContentLoaded", () => {{ const img = new Image(); img.src = "{data_url}"; img.onload = () => {{ const canvas = document.getElementById("canvas"); canvas.width = Math.min(img.width, window.innerWidth * 0.8); canvas.height = canvas.width * (img.height / img.width); canvas.getContext("2d").img = img; document.dispatchEvent(new Event("imageLoaded")); }}; }});'
-    )
+    try:
+        data_url = f"data:image/{uploaded_image.type.split('/')[-1]};base64,{base64.b64encode(uploaded_image.read()).decode()}"
+        # Inject image into JS by calling loadImage (defined in digitizer.js)
+        html_content = html_content.replace(
+            '<script>',
+            f'<script>document.addEventListener("DOMContentLoaded", () => {{ loadImage("{data_url}"); }});'
+        )
+        st.success("Image uploaded successfully. It should display in the canvas.")
+    except Exception as e:
+        st.error(f"Failed to process image: {str(e)}. Please try another image.")
+else:
+    st.info("No image uploaded yet. Use the Streamlit uploader or the HTML file input in the app.")
 
 # Render HTML/JS app
 st.components.v1.html(html_content, height=800, scrolling=True)
