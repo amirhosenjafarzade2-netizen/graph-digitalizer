@@ -16,6 +16,7 @@ let showGrid = false, logX = false, logY = false;
 let highlightPath = [], isHighlighting = false;
 let isDraggingPoint = false;
 let highlightWidth = 2; // Default highlight brush width
+let magnifierZoom = 2; // Default magnifier zoom
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels = ['X1', 'X2', 'Y1', 'Y2'];
 
@@ -49,12 +50,10 @@ const importJsonInput = document.getElementById('import-json-input');
 const exportJsonBtn = document.getElementById('export-json');
 const exportCsvBtn = document.getElementById('export-csv');
 const exportXlsxBtn = document.getElementById('export-xlsx');
-const exportImageBtn = document.getElementById('export-image');
 const clearSessionBtn = document.getElementById('clear-session');
 const totalResetBtn = document.getElementById('total-reset');
 const undoBtn = document.getElementById('undo');
 const redoBtn = document.getElementById('redo');
-const pointList = document.getElementById('point-list');
 const previewTable = document.getElementById('preview-table');
 const statusBar = document.getElementById('status-bar');
 
@@ -98,7 +97,7 @@ function showSpinner(on) { document.getElementById('spinner').style.display = on
 function saveSession() {
   localStorage.setItem('digitizerState', JSON.stringify({
     lines, axisPoints, scaleX, scaleY, offsetX, offsetY, logX, logY, isCalibrated,
-    zoom, panX, panY, showGrid, mode, currentLineIndex
+    zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom
   }));
 }
 
@@ -122,12 +121,13 @@ function loadSession() {
       showGrid = state.showGrid || false;
       mode = state.mode || 'none';
       currentLineIndex = state.currentLineIndex || 0;
+      magnifierZoom = state.magnifierZoom || 2;
       updateLineSelect();
-      updatePointList();
       updatePreview();
       updateButtonStates();
       toggleLogXBtn.classList.toggle('log-active', logX);
       toggleLogYBtn.classList.toggle('log-active', logY);
+      document.getElementById('magnifier-zoom').value = magnifierZoom;
       if (isCalibrated) {
         addPointBtn.disabled = false;
         adjustPointBtn.disabled = false;
@@ -153,7 +153,7 @@ function saveState() {
     axisPoints: JSON.parse(JSON.stringify(axisPoints)),
     scaleX, scaleY, offsetX, offsetY,
     logX, logY, isCalibrated,
-    zoom, panX, panY, showGrid, mode, currentLineIndex
+    zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom
   });
   historyIndex++;
   undoBtn.disabled = historyIndex <= 0;
@@ -202,7 +202,6 @@ function loadImage(dataUrl) {
     saveState();
     saveSession();
     showSpinner(false);
-    // Trigger redraw to ensure canvas updates
     document.dispatchEvent(new Event('imageLoaded'));
   };
   img.onerror = () => {
@@ -252,29 +251,6 @@ function updateLineSelect() {
   lineSelect.value = currentLineIndex;
 }
 
-function updatePointList() {
-  pointList.innerHTML = '';
-  if (lines[currentLineIndex].points.length === 0) {
-    pointList.textContent = 'No points';
-    return;
-  }
-  lines[currentLineIndex].points.forEach((p, i) => {
-    const div = document.createElement('div');
-    div.className = 'point-item';
-    const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(6);
-    const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(6);
-    div.textContent = `Point ${i + 1}: (${dataX}, ${dataY})`;
-    const selectBtn = document.createElement('button');
-    selectBtn.textContent = 'Select';
-    selectBtn.onclick = () => {
-      selectedPointIndex = i;
-      draw();
-    };
-    div.appendChild(selectBtn);
-    pointList.appendChild(div);
-  });
-}
-
 function updatePreview() {
   previewTable.innerHTML = '';
   if (lines.every(line => line.points.length === 0)) {
@@ -291,8 +267,8 @@ function updatePreview() {
     previewTable.appendChild(headerRow);
     line.points.forEach(p => {
       const row = document.createElement('tr');
-      const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(6);
-      const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(6);
+      const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(15);
+      const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(15);
       row.innerHTML = `<td>${dataX}</td><td>${dataY}</td>`;
       previewTable.appendChild(row);
     });
@@ -309,6 +285,40 @@ function findNearestPointIndex(x, y) {
     }
   });
   return closestIndex;
+}
+
+/**********************
+ * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
+ **********************/
+function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const f1 = -tension * t3 + 2 * tension * t2 - tension * t;
+  const f2 = (2 - tension) * t3 + (tension - 3) * t2 + 1;
+  const f3 = (tension - 2) * t3 + (3 - 2 * tension) * t2 + tension * t;
+  const f4 = tension * t3 - tension * t2;
+  return {
+    x: f1 * p0.x + f2 * p1.x + f3 * p2.x + f4 * p3.x,
+    y: f1 * p0.y + f2 * p1.y + f3 * p2.y + f4 * p3.y
+  };
+}
+
+function drawCatmullRomPath(ctx, points, segments = 20) {
+  if (points.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[Math.min(points.length - 1, i + 1)];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    for (let j = 0; j <= segments; j++) {
+      const t = j / segments;
+      const point = getCatmullRomPoint(t, p0, p1, p2, p3);
+      ctx.lineTo(point.x, point.y);
+    }
+  }
+  ctx.stroke();
 }
 
 /**********************
@@ -387,25 +397,13 @@ const draw = debounce(() => {
     });
   });
 
-  // Draw highlight path with smoothing
+  // Draw highlight path with Catmull-Rom spline
   if (highlightPath.length > 1) {
     ctx.strokeStyle = 'yellow';
     ctx.lineWidth = highlightWidth / zoom;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(highlightPath[0].x, highlightPath[0].y);
-    for (let i = 1; i < highlightPath.length - 2; i++) {
-      const xc = (highlightPath[i].x + highlightPath[i + 1].x) / 2;
-      const yc = (highlightPath[i].y + highlightPath[i + 1].y) / 2;
-      ctx.quadraticCurveTo(highlightPath[i].x, highlightPath[i].y, xc, yc);
-    }
-    if (highlightPath.length > 2) {
-      ctx.quadraticCurveTo(highlightPath[highlightPath.length - 2].x, highlightPath[highlightPath.length - 2].y, highlightPath[highlightPath.length - 1].x, highlightPath[highlightPath.length - 1].y);
-    } else if (highlightPath.length === 2) {
-      ctx.lineTo(highlightPath[1].x, highlightPath[1].y);
-    }
-    ctx.stroke();
+    drawCatmullRomPath(ctx, highlightPath, 20);
   }
 
   ctx.restore();
@@ -430,6 +428,8 @@ canvas.addEventListener('mousemove', e => {
   if (mode === 'axes' && orthogonalAxes.checked) {
     if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
       y = axisPoints[0].y;
+    } else if (axisPoints.length === 2) { // Snapping Y1 to X1's x-coordinate
+      x = axisPoints[0].x;
     } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
       x = axisPoints[2].x;
     }
@@ -442,10 +442,10 @@ canvas.addEventListener('mousemove', e => {
     magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
     magCtx.drawImage(
       canvas,
-      x - 25,
-      y - 25,
-      50,
-      50,
+      x - 25 / magnifierZoom,
+      y - 25 / magnifierZoom,
+      50 / magnifierZoom,
+      50 / magnifierZoom,
       0, 0, 100, 100
     );
     magCtx.beginPath();
@@ -463,7 +463,6 @@ canvas.addEventListener('mousemove', e => {
     const { dataX, dataY } = dataCoords;
     lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY };
     console.log(`Adjusting point ${selectedPointIndex}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
-    updatePointList();
     updatePreview();
     draw();
   }
@@ -528,6 +527,8 @@ canvas.addEventListener('mousedown', e => {
     if (orthogonalAxes.checked) {
       if (axisPoints.length === 1) { // Snap X2 to X1's y
         y = axisPoints[0].y;
+      } else if (axisPoints.length === 2) { // Snap Y1 to X1's x
+        x = axisPoints[0].x;
       } else if (axisPoints.length === 3) { // Snap Y2 to Y1's x
         x = axisPoints[2].x;
       }
@@ -550,7 +551,6 @@ canvas.addEventListener('mousedown', e => {
     const { dataX, dataY } = dataCoords;
     console.log(`Adding point: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     lines[currentLineIndex].points.push({ x, y, dataX, dataY });
-    updatePointList();
     updatePreview();
     draw();
     saveState();
@@ -560,7 +560,6 @@ canvas.addEventListener('mousedown', e => {
     const index = findNearestPointIndex(x, y);
     if (index !== -1) {
       lines[currentLineIndex].points.splice(index, 1);
-      updatePointList();
       updatePreview();
       draw();
       saveState();
@@ -621,7 +620,6 @@ canvas.addEventListener('mouseup', e => {
     });
     highlightPath = [];
     updateLineSelect();
-    updatePointList();
     updatePreview();
     draw();
     saveState();
@@ -710,7 +708,7 @@ calibrateBtn.addEventListener('click', () => {
     showModal('Please set all four axis points (X1, X2, Y1, Y2)');
     return;
   }
-  if (Math.abs(axisPoints[1].x - axisPoints[0].x) < 1e-6 || Math.abs(axisPoints[3].y - axisPoints[2].y) < 1e-6) {
+  if (Math.abs(axisPoints[1].x - axisPoints[0].x) < 1e-10 || Math.abs(axisPoints[3].y - axisPoints[2].y) < 1e-10) {
     showModal('Axis points must have distinct x/y coordinates (too close)');
     return;
   }
@@ -723,7 +721,6 @@ calibrateBtn.addEventListener('click', () => {
     return;
   }
 
-  // Fixed scale and offset calculations
   const x1Pix = axisPoints[0].x, x2Pix = axisPoints[1].x;
   const y1Pix = axisPoints[2].y, y2Pix = axisPoints[3].y;
   const deltaPixX = x2Pix - x1Pix;
@@ -731,14 +728,12 @@ calibrateBtn.addEventListener('click', () => {
   const deltaValX = logX ? Math.log10(x2Val) - Math.log10(x1Val) : x2Val - x1Val;
   const deltaValY = logY ? Math.log10(y2Val) - Math.log10(y1Val) : y2Val - y1Val;
 
-  // Fixed: scale = deltaPix / deltaVal, offset = pix1 - val1 * scale
   scaleX = deltaPixX / deltaValX;
   scaleY = deltaPixY / deltaValY;
   offsetX = logX ? x1Pix - Math.log10(x1Val) * scaleX : x1Pix - x1Val * scaleX;
   offsetY = logY ? y1Pix - Math.log10(y1Val) * scaleY : y1Pix - y1Val * scaleY;
 
-  // Enhanced validation
-  if (!isFinite(scaleX) || !isFinite(scaleY) || Math.abs(deltaPixX) < 1e-6 || Math.abs(deltaPixY) < 1e-6 || Math.abs(deltaValX) < 1e-6 || Math.abs(deltaValY) < 1e-6) {
+  if (!isFinite(scaleX) || !isFinite(scaleY) || Math.abs(deltaPixX) < 1e-10 || Math.abs(deltaPixY) < 1e-10 || Math.abs(deltaValX) < 1e-10 || Math.abs(deltaValY) < 1e-10) {
     showModal('Calibration failed: Axes too close or invalid values. Adjust points/values.');
     console.error('Invalid calibration:', { scaleX, scaleY, offsetX, offsetY });
     return;
@@ -769,7 +764,6 @@ calibrateBtn.addEventListener('click', () => {
   draw();
   updatePreview();
 
-  // Update existing points with new calibration
   lines.forEach(line => {
     line.points.forEach(p => {
       let dataCoords = canvasToDataCoords(p.x, p.y);
@@ -780,7 +774,6 @@ calibrateBtn.addEventListener('click', () => {
       }
     });
   });
-  updatePointList();
   updatePreview();
 });
 
@@ -805,7 +798,7 @@ toggleLogXBtn.addEventListener('click', () => {
     const deltaValX = logX ? Math.log10(x2Val) - Math.log10(x1Val) : x2Val - x1Val;
     scaleX = deltaPixX / deltaValX;
     offsetX = logX ? axisPoints[0].x - Math.log10(x1Val) * scaleX : axisPoints[0].x - x1Val * scaleX;
-    if (!isFinite(scaleX) || Math.abs(deltaPixX) < 1e-6 || Math.abs(deltaValX) < 1e-6) {
+    if (!isFinite(scaleX) || Math.abs(deltaPixX) < 1e-10 || Math.abs(deltaValX) < 1e-10) {
       showModal('Invalid X-axis scale after toggling log mode.');
       console.error('Invalid scaleX:', scaleX);
       logX = !logX;
@@ -821,7 +814,6 @@ toggleLogXBtn.addEventListener('click', () => {
         }
       });
     });
-    updatePointList();
     updatePreview();
     draw();
     saveState();
@@ -843,7 +835,7 @@ toggleLogYBtn.addEventListener('click', () => {
     const deltaValY = logY ? Math.log10(y2Val) - Math.log10(y1Val) : y2Val - y1Val;
     scaleY = deltaPixY / deltaValY;
     offsetY = logY ? axisPoints[2].y - Math.log10(y1Val) * scaleY : axisPoints[2].y - y1Val * scaleY;
-    if (!isFinite(scaleY) || Math.abs(deltaPixY) < 1e-6 || Math.abs(deltaValY) < 1e-6) {
+    if (!isFinite(scaleY) || Math.abs(deltaPixY) < 1e-10 || Math.abs(deltaValY) < 1e-10) {
       showModal('Invalid Y-axis scale after toggling log mode.');
       console.error('Invalid scaleY:', scaleY);
       logY = !logY;
@@ -859,7 +851,6 @@ toggleLogYBtn.addEventListener('click', () => {
         }
       });
     });
-    updatePointList();
     updatePreview();
     draw();
     saveState();
@@ -888,6 +879,7 @@ totalResetBtn.addEventListener('click', () => {
     history = [];
     historyIndex = -1;
     showGrid = false;
+    magnifierZoom = 2;
     toggleLogXBtn.classList.remove('log-active');
     toggleLogYBtn.classList.remove('log-active');
     axisInputs.style.display = 'none';
@@ -904,7 +896,6 @@ totalResetBtn.addEventListener('click', () => {
     redoBtn.disabled = true;
     highlightControls.style.display = 'none';
     updateLineSelect();
-    updatePointList();
     updatePreview();
     updateButtonStates();
     localStorage.removeItem('digitizerState');
@@ -933,7 +924,6 @@ deleteHighlightBtn.addEventListener('click', () => {
 
 clearPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points = [];
-  updatePointList();
   updatePreview();
   draw();
   saveState();
@@ -942,7 +932,6 @@ clearPointsBtn.addEventListener('click', () => {
 
 sortPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points.sort((a, b) => a.dataX - b.dataX);
-  updatePointList();
   updatePreview();
   draw();
   saveState();
@@ -1009,7 +998,6 @@ newLineBtn.addEventListener('click', () => {
     lines.push({ name, points: [] });
     currentLineIndex = lines.length - 1;
     updateLineSelect();
-    updatePointList();
     updatePreview();
     draw();
     saveState();
@@ -1037,7 +1025,6 @@ renameLineBtn.addEventListener('click', () => {
 
 lineSelect.addEventListener('change', () => {
   currentLineIndex = parseInt(lineSelect.value);
-  updatePointList();
   updatePreview();
   draw();
   saveSession();
@@ -1073,14 +1060,15 @@ importJsonInput.addEventListener('change', e => {
         showGrid = state.showGrid || false;
         mode = state.mode || 'none';
         currentLineIndex = state.currentLineIndex || 0;
+        magnifierZoom = state.magnifierZoom || 2;
         history = [];
         historyIndex = -1;
         updateLineSelect();
-        updatePointList();
         updatePreview();
         updateButtonStates();
         toggleLogXBtn.classList.toggle('log-active', logX);
         toggleLogYBtn.classList.toggle('log-active', logY);
+        document.getElementById('magnifier-zoom').value = magnifierZoom;
         if (isCalibrated) {
           addPointBtn.disabled = false;
           adjustPointBtn.disabled = false;
@@ -1110,7 +1098,7 @@ importJsonInput.addEventListener('change', e => {
 });
 
 exportJsonBtn.addEventListener('click', () => {
-  download('graph.json', JSON.stringify({ lines, axisPoints, scaleX, scaleY, offsetX, offsetY, logX, logY, isCalibrated, zoom, panX, panY, showGrid, mode, currentLineIndex }), 'application/json');
+  download('graph.json', JSON.stringify({ lines, axisPoints, scaleX, scaleY, offsetX, offsetY, logX, logY, isCalibrated, zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom }), 'application/json');
 });
 
 exportCsvBtn.addEventListener('click', () => {
@@ -1129,27 +1117,38 @@ exportCsvBtn.addEventListener('click', () => {
 });
 
 exportXlsxBtn.addEventListener('click', () => {
-  const workbook = XLSX.utils.book_new();
-  lines.forEach(line => {
-    const data = line.points.map(p => {
-      const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX;
-      const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY;
-      return [dataX, dataY];
+  try {
+    const workbook = XLSX.utils.book_new();
+    lines.forEach(line => {
+      if (line.points.length === 0) return; // Skip empty lines
+      const data = line.points.map(p => {
+        const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15));
+        const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15));
+        return [dataX, dataY];
+      });
+      data.unshift(['X', 'Y']); // Header
+      const worksheet = XLSX.utils.aoa_to_sheet(data);
+      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_'); // Sanitize sheet name
+      XLSX.utils.book_append_sheet(workbook, worksheet, safeName);
     });
-    data.unshift(['X', 'Y']); // Header
-    const worksheet = XLSX.utils.aoa_to_sheet(data);
-    XLSX.utils.book_append_sheet(workbook, worksheet, line.name.substring(0, 31));
-  });
-  XLSX.writeFile(workbook, 'graph.xlsx');
+    if (workbook.SheetNames.length === 0) {
+      showModal('No data to export.');
+      return;
+    }
+    XLSX.writeFile(workbook, 'graph.xlsx');
+  } catch (e) {
+    showModal('Failed to export XLSX. Please try again.');
+    console.error('XLSX export error:', e);
+  }
 });
 
-exportImageBtn.addEventListener('click', () => {
-  download('graph.png', canvas.toDataURL('image/png'), 'image/png');
-});
-
-clearSessionBtn.addEventListener('click', () => {
-  localStorage.removeItem('digitizerState');
-  showModal('Session cleared. Reload to reset.');
+/**********************
+ * MAGNIFIER ZOOM
+ **********************/
+document.getElementById('magnifier-zoom').addEventListener('input', (e) => {
+  magnifierZoom = parseFloat(e.target.value);
+  saveSession();
+  draw();
 });
 
 /**********************
@@ -1174,10 +1173,11 @@ undoBtn.addEventListener('click', () => {
     showGrid = state.showGrid;
     mode = state.mode;
     currentLineIndex = state.currentLineIndex;
+    magnifierZoom = state.magnifierZoom;
     toggleLogXBtn.classList.toggle('log-active', logX);
     toggleLogYBtn.classList.toggle('log-active', logY);
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
     updateLineSelect();
-    updatePointList();
     updatePreview();
     updateButtonStates();
     if (isCalibrated) {
@@ -1228,10 +1228,11 @@ redoBtn.addEventListener('click', () => {
     showGrid = state.showGrid;
     mode = state.mode;
     currentLineIndex = state.currentLineIndex;
+    magnifierZoom = state.magnifierZoom;
     toggleLogXBtn.classList.toggle('log-active', logX);
     toggleLogYBtn.classList.toggle('log-active', logY);
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
     updateLineSelect();
-    updatePointList();
     updatePreview();
     updateButtonStates();
     if (isCalibrated) {
