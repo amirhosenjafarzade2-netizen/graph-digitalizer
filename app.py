@@ -12,10 +12,6 @@ except FileNotFoundError as e:
     st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
     st.stop()
 
-# Escape curly braces in css and js to prevent format issues
-css = css.replace('{', '{{').replace('}', '}}')
-js = js.replace('{', '{{').replace('}', '}}')
-
 # Debugging: Log lengths of css and js
 st.write(f"Debug: CSS length = {len(css)} characters, JS length = {len(js)} characters")
 
@@ -28,7 +24,7 @@ html_content = """
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Graph Digitizer Pro</title>
   <style>
-    {}
+    %s
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
@@ -152,11 +148,11 @@ html_content = """
     });
   </script>
   <script>
-    {}
+    %s
   </script>
 </body>
 </html>
-""".format(css, js)
+""" % (css, js)
 
 # Streamlit UI
 st.title("Graph Digitizer Pro")
