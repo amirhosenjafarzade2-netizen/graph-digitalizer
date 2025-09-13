@@ -12,7 +12,7 @@ except FileNotFoundError as e:
     st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
     st.stop()
 
-# HTML content embedding CSS and JS
+# HTML content embedding CSS, JS, and inline upload button script
 html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -35,6 +35,9 @@ html_content = f"""
       <h3>Graph Digitizer Pro</h3>
       <button id="image-upload-btn" title="Upload graph image">Upload Image</button>
       <input type="file" id="image-upload" accept="image/*" style="display: none;">
+      <!-- Fallback button for debugging -->
+      <button id="fallback-upload-btn" title="Fallback upload (visible input)">Fallback Upload</button>
+      <input type="file" id="fallback-image-upload" accept="image/*">
       <details open>
         <summary>Image & View</summary>
         <p class="section-desc">Upload and adjust the graph view.</p>
@@ -113,6 +116,32 @@ html_content = f"""
   </div>
   <div id="modal"><div id="modal-content"></div></div>
   <div id="spinner">Processing...</div>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const uploadBtn = document.getElementById('image-upload-btn');
+      const imageUpload = document.getElementById('image-upload');
+      const fallbackBtn = document.getElementById('fallback-upload-btn');
+      const fallbackInput = document.getElementById('fallback-image-upload');
+      if (!uploadBtn || !imageUpload) {
+        console.error('Upload button or input not found in DOM');
+        alert('Error: Upload elements not found. Please refresh the page.');
+        return;
+      }
+      uploadBtn.addEventListener('click', () => {
+        console.log('Upload Image button clicked');
+        imageUpload.click();
+      });
+      fallbackBtn.addEventListener('click', () => {
+        console.log('Fallback Upload button clicked');
+        fallbackInput.click();
+      });
+      fallbackInput.addEventListener('change', (e) => {
+        console.log('Fallback input changed');
+        imageUpload.files = e.target.files; // Sync with main input
+        imageUpload.dispatchEvent(new Event('change'));
+      });
+    });
+  </script>
   <script>{js}</script>
 </body>
 </html>
