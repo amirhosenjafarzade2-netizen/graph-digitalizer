@@ -22,6 +22,7 @@ html_content = f"""
   <title>Graph Digitizer Pro</title>
   <style>{css}</style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div id="container">
@@ -32,9 +33,11 @@ html_content = f"""
     </div>
     <div id="controls" aria-label="Controls Panel">
       <h3>Graph Digitizer Pro</h3>
-      <input type="file" id="image-upload" accept="image/*" title="Upload graph image">
+      <button id="image-upload-btn" title="Upload graph image">Upload Image</button>
+      <input type="file" id="image-upload" accept="image/*" style="display: none;">
       <details open>
-        <summary>View</summary>
+        <summary>Image & View</summary>
+        <p class="section-desc">Upload and adjust the graph view.</p>
         <button id="zoom-in" title="Zoom In (+)">Zoom In</button>
         <button id="zoom-out" title="Zoom Out (-)">Zoom Out</button>
         <button id="reset-view" title="Reset View (0)">Reset View</button>
@@ -43,7 +46,8 @@ html_content = f"""
         <p>Magnifier Zoom: <input type="range" id="magnifier-zoom" min="2" max="10" value="2" title="Adjust magnifier zoom level"></p>
       </details>
       <details open>
-        <summary>Calibration</summary>
+        <summary>Axis Calibration</summary>
+        <p class="section-desc">Set axis points and values to calibrate the graph.</p>
         <p id="axis-instruction">Click "Set Axis Points" then enter values.</p>
         <button id="set-axes" title="Start axis calibration">Set Axis Points</button>
         <button id="reset-axis-points" title="Reset axis points">Reset Axis Points</button>
@@ -62,6 +66,7 @@ html_content = f"""
       </details>
       <details open>
         <summary>Point Actions</summary>
+        <p class="section-desc">Add, adjust, or highlight points on the graph.</p>
         <button id="add-point" title="Click to add points (P)">Add Point</button>
         <button id="adjust-point" title="Click and drag to reposition a point">Adjust Point</button>
         <button id="delete-point" title="Click to delete a point">Delete Point</button>
@@ -77,12 +82,14 @@ html_content = f"""
       </details>
       <details open>
         <summary>Line Management</summary>
+        <p class="section-desc">Create or rename lines to organize data.</p>
         <button id="new-line" title="Create new line">New Line</button>
         <button id="rename-line" title="Rename current line">Rename Line</button>
         <select id="line-select" title="Select active line"></select>
       </details>
-      <details open>
-        <summary>Data</summary>
+      <details>
+        <summary>Data Export</summary>
+        <p class="section-desc">Import or export digitized data.</p>
         <input type="file" id="import-json-input" accept=".json" style="display: none;">
         <button id="import-json" title="Import JSON data">Import JSON</button>
         <button id="export-json" title="Export JSON data">Export JSON</button>
@@ -92,11 +99,13 @@ html_content = f"""
         <button id="total-reset" title="Reset all calibration and data">Total Reset</button>
       </details>
       <details>
-        <summary>Preview Data</summary>
+        <summary>Data Preview</summary>
+        <p class="section-desc">View digitized points in a table.</p>
         <table id="preview-table"></table>
       </details>
-      <details open>
+      <details>
         <summary>History</summary>
+        <p class="section-desc">Undo or redo actions.</p>
         <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
         <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
       </details>
@@ -110,8 +119,8 @@ html_content = f"""
 """
 
 # Streamlit UI
-st.title("Graph Digitizer Pro - Streamlit Edition")
-st.markdown("Upload a graph image using the control panel on the right, then digitize points by clicking on the canvas. Calibrate axes, add points, and export data as JSON, CSV, or XLSX.")
+st.title("Graph Digitizer Pro")
+st.markdown("Digitize points from graph images with ease. Use the control panel to upload an image, calibrate axes, add points, and export data as JSON, CSV, or XLSX.")
 
 # Render HTML/JS app
 st.components.v1.html(html_content, height=800, scrolling=True)
