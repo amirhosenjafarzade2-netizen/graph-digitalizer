@@ -15,6 +15,7 @@ let history = [], historyIndex = -1;
 let showGrid = false, logX = false, logY = false;
 let highlightPath = [], isHighlighting = false;
 let isDraggingPoint = false;
+let highlightWidth = 2; // Default highlight brush width
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels = ['X1', 'X2', 'Y1', 'Y2'];
 
@@ -47,6 +48,7 @@ const importJsonBtn = document.getElementById('import-json');
 const importJsonInput = document.getElementById('import-json-input');
 const exportJsonBtn = document.getElementById('export-json');
 const exportCsvBtn = document.getElementById('export-csv');
+const exportXlsxBtn = document.getElementById('export-xlsx');
 const exportImageBtn = document.getElementById('export-image');
 const clearSessionBtn = document.getElementById('clear-session');
 const totalResetBtn = document.getElementById('total-reset');
@@ -175,6 +177,42 @@ function debounce(func, wait) {
 }
 
 /**********************
+ * IMAGE LOADING
+ **********************/
+function loadImage(dataUrl) {
+  showSpinner(true);
+  img.src = ''; // Clear previous image
+  img.src = dataUrl;
+  img.onload = () => {
+    console.log('Image loaded successfully:', { width: img.width, height: img.height, src: dataUrl });
+    zoom = 1;
+    panX = 0;
+    panY = 0;
+    canvas.width = Math.min(img.width, window.innerWidth * 0.8);
+    canvas.height = canvas.width * (img.height / img.width);
+    if (canvas.width === 0 || canvas.height === 0) {
+      showModal('Image dimensions are invalid. Please try another image.');
+      console.error('Invalid image dimensions: width=', img.width, 'height=', img.height);
+      showSpinner(false);
+      return;
+    }
+    draw();
+    setAxesBtn.disabled = false;
+    resetAxisPointsBtn.disabled = false;
+    saveState();
+    saveSession();
+    showSpinner(false);
+    // Trigger redraw to ensure canvas updates
+    document.dispatchEvent(new Event('imageLoaded'));
+  };
+  img.onerror = () => {
+    showModal('Failed to load image. Please try another image or check file integrity.');
+    console.error('Image load failed: src=', dataUrl);
+    showSpinner(false);
+  };
+}
+
+/**********************
  * COORDINATE TRANSFORMATIONS
  **********************/
 function imageToCanvasCoords(clientX, clientY) {
@@ -282,8 +320,8 @@ const draw = debounce(() => {
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
 
-  // Draw image
-  if (img.src) {
+  // Draw image only if loaded
+  if (img.src && img.complete && img.naturalWidth > 0) {
     try {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     } catch (e) {
@@ -295,7 +333,7 @@ const draw = debounce(() => {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#fff';
     ctx.font = '16px Arial';
-    ctx.fillText('No image loaded. Please upload an image.', 10, 20);
+    ctx.fillText(img.src ? 'Loading image...' : 'No image loaded. Please upload an image.', 10, 20);
   }
 
   // Draw grid
@@ -349,19 +387,35 @@ const draw = debounce(() => {
     });
   });
 
-  // Draw highlight path
+  // Draw highlight path with smoothing
   if (highlightPath.length > 1) {
+    ctx.strokeStyle = 'yellow';
+    ctx.lineWidth = highlightWidth / zoom;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctx.beginPath();
     ctx.moveTo(highlightPath[0].x, highlightPath[0].y);
-    highlightPath.forEach(p => ctx.lineTo(p.x, p.y));
-    ctx.strokeStyle = 'yellow';
-    ctx.lineWidth = 2 / zoom;
+    for (let i = 1; i < highlightPath.length - 2; i++) {
+      const xc = (highlightPath[i].x + highlightPath[i + 1].x) / 2;
+      const yc = (highlightPath[i].y + highlightPath[i + 1].y) / 2;
+      ctx.quadraticCurveTo(highlightPath[i].x, highlightPath[i].y, xc, yc);
+    }
+    if (highlightPath.length > 2) {
+      ctx.quadraticCurveTo(highlightPath[highlightPath.length - 2].x, highlightPath[highlightPath.length - 2].y, highlightPath[highlightPath.length - 1].x, highlightPath[highlightPath.length - 1].y);
+    } else if (highlightPath.length === 2) {
+      ctx.lineTo(highlightPath[1].x, highlightPath[1].y);
+    }
     ctx.stroke();
   }
 
   ctx.restore();
-  requestAnimationFrame(draw);
 }, 16);
+
+// Listen for imageLoaded event to trigger redraw
+document.addEventListener('imageLoaded', () => {
+  console.log('imageLoaded event triggered');
+  draw();
+});
 
 /**********************
  * EVENT HANDLERS
@@ -440,35 +494,10 @@ imageUpload.addEventListener('change', e => {
     return;
   }
 
-  showSpinner(true);
   const reader = new FileReader();
   reader.onload = ev => {
-    img.src = ev.target.result;
-    img.onload = () => {
-      zoom = 1;
-      panX = 0;
-      panY = 0;
-      canvas.width = Math.min(img.width, window.innerWidth * 0.8);
-      canvas.height = canvas.width * (img.height / img.width);
-      if (canvas.width === 0 || canvas.height === 0) {
-        showModal('Image dimensions are invalid. Please try another image.');
-        console.error('Invalid image dimensions: width=', img.width, 'height=', img.height);
-        showSpinner(false);
-        return;
-      }
-      console.log('Image loaded successfully: width=', canvas.width, 'height=', canvas.height);
-      draw();
-      setAxesBtn.disabled = false;
-      resetAxisPointsBtn.disabled = false;
-      saveState();
-      saveSession();
-      showSpinner(false);
-    };
-    img.onerror = () => {
-      showModal('Failed to load image. Please try another image or check file integrity.');
-      console.error('Image load failed: src=', img.src);
-      showSpinner(false);
-    };
+    console.log('HTML input image read:', file.name);
+    loadImage(ev.target.result);
   };
   reader.onerror = () => {
     showModal('Error reading file. Please try another image.');
@@ -1099,6 +1128,21 @@ exportCsvBtn.addEventListener('click', () => {
   download('graph.csv', csv, 'text/csv');
 });
 
+exportXlsxBtn.addEventListener('click', () => {
+  const workbook = XLSX.utils.book_new();
+  lines.forEach(line => {
+    const data = line.points.map(p => {
+      const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX;
+      const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY;
+      return [dataX, dataY];
+    });
+    data.unshift(['X', 'Y']); // Header
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    XLSX.utils.book_append_sheet(workbook, worksheet, line.name.substring(0, 31));
+  });
+  XLSX.writeFile(workbook, 'graph.xlsx');
+});
+
 exportImageBtn.addEventListener('click', () => {
   download('graph.png', canvas.toDataURL('image/png'), 'image/png');
 });
@@ -1223,7 +1267,7 @@ redoBtn.addEventListener('click', () => {
  * INITIALIZATION
  **********************/
 window.addEventListener('resize', () => {
-  if (img.src) {
+  if (img.src && img.complete && img.naturalWidth > 0) {
     canvas.width = Math.min(img.width, window.innerWidth * 0.8);
     canvas.height = canvas.width * (img.height / img.width);
     draw();
@@ -1236,3 +1280,9 @@ if (localStorage.getItem('theme') === 'dark') {
 
 loadSession();
 draw();
+
+const highlightWidthSlider = document.getElementById('highlight-width');
+highlightWidthSlider.addEventListener('input', (e) => {
+  highlightWidth = parseInt(e.target.value);
+  draw();
+});
