@@ -12,6 +12,13 @@ except FileNotFoundError as e:
     st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
     st.stop()
 
+# Escape curly braces in css and js to prevent format issues
+css = css.replace('{', '{{').replace('}', '}}')
+js = js.replace('{', '{{').replace('}', '}}')
+
+# Debugging: Log lengths of css and js
+st.write(f"Debug: CSS length = {len(css)} characters, JS length = {len(js)} characters")
+
 # HTML content with CSS, JS, and inline upload button script
 html_content = """
 <!DOCTYPE html>
@@ -156,4 +163,8 @@ st.title("Graph Digitizer Pro")
 st.markdown("Digitize points from graph images with ease. Use the control panel to upload an image, calibrate axes, add points, and export data as JSON, CSV, or XLSX.")
 
 # Render HTML/JS app
-st.components.v1.html(html_content, height=800, scrolling=True)
+try:
+    st.components.v1.html(html_content, height=800, scrolling=True)
+except Exception as e:
+    st.error(f"Error rendering HTML: {str(e)}")
+    st.markdown(html_content, unsafe_allow_html=True)  # Fallback rendering
