@@ -1,5 +1,4 @@
 import streamlit as st
-import base64
 
 st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 
@@ -112,23 +111,7 @@ html_content = f"""
 
 # Streamlit UI
 st.title("Graph Digitizer Pro - Streamlit Edition")
-st.markdown("Upload a graph image and digitize points by clicking on the canvas. Calibrate axes, add points, and export data as JSON or CSV.")
-
-# Optional image uploader
-uploaded_image = st.file_uploader("Upload graph image (optional, overrides HTML upload)", type=["png", "jpg", "jpeg", "gif", "bmp"])
-if uploaded_image:
-    try:
-        data_url = f"data:image/{uploaded_image.type.split('/')[-1]};base64,{base64.b64encode(uploaded_image.read()).decode()}"
-        # Inject image into JS by calling loadImage after scripts are loaded
-        html_content = html_content.replace(
-            '</body>',
-            f'<script>window.addEventListener("load", () => {{ loadImage("{data_url}"); }});</script></body>'
-        )
-        st.success("Image uploaded successfully. It should display in the canvas.")
-    except Exception as e:
-        st.error(f"Failed to process image: {str(e)}. Please try another image.")
-else:
-    st.info("No image uploaded yet. Use the Streamlit uploader or the HTML file input in the app.")
+st.markdown("Upload a graph image using the control panel on the right, then digitize points by clicking on the canvas. Calibrate axes, add points, and export data as JSON, CSV, or XLSX.")
 
 # Render HTML/JS app
 st.components.v1.html(html_content, height=800, scrolling=True)
