@@ -15,9 +15,9 @@ let history = [], historyIndex = -1;
 let showGrid = false, logX = false, logY = false;
 let highlightPath = [], isHighlighting = false;
 let isDraggingPoint = false;
-let highlightWidth = 2; // Default highlight brush width
-let magnifierZoom = 2; // Default magnifier zoom
-let flashPoint = null, flashStart = null; // For new point animation
+let highlightWidth = 2;
+let magnifierZoom = 2;
+let flashPoint = null, flashStart = null;
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels = ['X1', 'X2', 'Y1', 'Y2'];
 
@@ -217,7 +217,7 @@ function debounce(func, wait) {
  **********************/
 function loadImage(dataUrl) {
   showSpinner(true);
-  img.src = ''; // Clear previous image
+  img.src = '';
   img.src = dataUrl;
   img.onload = () => {
     console.log('Image loaded successfully:', { width: img.width, height: img.height, src: dataUrl });
@@ -324,7 +324,7 @@ function findNearestPointIndex(x, y) {
 }
 
 /**********************
- * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
+ * CATMULL-ROM SPLINE
  **********************/
 function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
   const t2 = t * t;
@@ -366,7 +366,6 @@ const draw = debounce(() => {
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
 
-  // Draw image only if loaded
   if (img.src && img.complete && img.naturalWidth > 0) {
     try {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -382,7 +381,6 @@ const draw = debounce(() => {
     ctx.fillText(img.src ? 'Loading image...' : 'No image loaded. Please upload an image.', 10, 20);
   }
 
-  // Draw grid
   if (isCalibrated && showGrid) {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.lineWidth = 1 / zoom;
@@ -408,7 +406,6 @@ const draw = debounce(() => {
     }
   }
 
-  // Draw axis points with pulsing effect for active point
   ctx.font = `${12 / zoom}px Arial`;
   axisPoints.forEach((p, i) => {
     ctx.fillStyle = mode === 'axes' && i === axisPoints.length ? '#ff4444' : 'red';
@@ -420,7 +417,6 @@ const draw = debounce(() => {
     ctx.fillText(axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom);
   });
 
-  // Draw points
   lines.forEach((line, lineIdx) => {
     ctx.fillStyle = lineColors[lineIdx % lineColors.length];
     line.points.forEach((p, i) => {
@@ -435,7 +431,6 @@ const draw = debounce(() => {
     });
   });
 
-  // Draw flashing point for new points
   if (flashPoint && Date.now() - flashStart < 500) {
     ctx.fillStyle = 'yellow';
     ctx.beginPath();
@@ -443,7 +438,6 @@ const draw = debounce(() => {
     ctx.fill();
   }
 
-  // Draw highlight path with Catmull-Rom spline
   if (highlightPath.length > 1) {
     ctx.strokeStyle = 'yellow';
     ctx.lineWidth = highlightWidth / zoom;
@@ -455,7 +449,6 @@ const draw = debounce(() => {
   ctx.restore();
 }, 16);
 
-// Listen for imageLoaded event to trigger redraw
 document.addEventListener('imageLoaded', () => {
   console.log('imageLoaded event triggered');
   draw();
@@ -464,6 +457,52 @@ document.addEventListener('imageLoaded', () => {
 /**********************
  * EVENT HANDLERS
  **********************/
+window.onload = () => {
+  const uploadBtn = document.getElementById('image-upload-btn');
+  if (!uploadBtn) {
+    console.error('Upload button not found in DOM');
+    showModal('Error: Upload button not found. Please refresh the page.');
+    return;
+  }
+  if (!imageUpload) {
+    console.error('Image upload input not found in DOM');
+    showModal('Error: Image upload input not found. Please refresh the page.');
+    return;
+  }
+  uploadBtn.addEventListener('click', () => {
+    console.log('Upload button clicked');
+    imageUpload.click();
+  });
+};
+
+imageUpload.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) {
+    showModal('No file selected. Please choose an image.');
+    console.error('No file selected for image upload');
+    return;
+  }
+
+  const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
+  if (!validTypes.includes(file.type)) {
+    showModal('Invalid file type. Please upload a PNG, JPEG, GIF, or BMP image.');
+    console.error('Invalid file type:', file.type);
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    console.log('HTML input image read:', file.name);
+    loadImage(ev.target.result);
+  };
+  reader.onerror = () => {
+    showModal('Error reading file. Please try another image.');
+    console.error('FileReader error for file:', file.name);
+    showSpinner(false);
+  };
+  reader.readAsDataURL(file);
+});
+
 canvas.addEventListener('mousemove', e => {
   let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
   let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
@@ -472,16 +511,12 @@ canvas.addEventListener('mousemove', e => {
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
   if (mode === 'axes' && orthogonalAxes.checked) {
-    if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
-      y = axisPoints[0].y;
-    } else if (axisPoints.length === 2) { // Snapping Y1 to X1's x-coordinate
-      x = axisPoints[0].x;
-    } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
-      x = axisPoints[2].x;
-    }
+    if (axisPoints.length === 1) y = axisPoints[0].y;
+    else if (axisPoints.length === 2) x = axisPoints[0].x;
+    else if (axisPoints.length === 3) x = axisPoints[2].x;
   }
 
-  if (mode === 'axes' || mode === 'highlight' || mode === 'add' || mode === 'adjust' || mode === 'delete') {
+  if (['axes', 'highlight', 'add', 'adjust', 'delete'].includes(mode)) {
     magnifier.style.display = 'block';
     magnifier.style.left = `${e.clientX + 10}px`;
     magnifier.style.top = `${e.clientY + 10}px`;
@@ -524,38 +559,6 @@ canvas.addEventListener('mouseleave', () => {
   statusBar.textContent = `Mode: ${mode}`;
 });
 
-document.getElementById('image-upload-btn').addEventListener('click', () => {
-  imageUpload.click();
-});
-
-imageUpload.addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) {
-    showModal('No file selected. Please choose an image.');
-    console.error('No file selected for image upload');
-    return;
-  }
-
-  const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
-  if (!validTypes.includes(file.type)) {
-    showModal('Invalid file type. Please upload a PNG, JPEG, GIF, or BMP image.');
-    console.error('Invalid file type:', file.type);
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = ev => {
-    console.log('HTML input image read:', file.name);
-    loadImage(ev.target.result);
-  };
-  reader.onerror = () => {
-    showModal('Error reading file. Please try another image.');
-    console.error('FileReader error for file:', file.name);
-    showSpinner(false);
-  };
-  reader.readAsDataURL(file);
-});
-
 document.getElementById('zoom-in').onclick = () => { zoom *= 1.2; draw(); saveSession(); };
 document.getElementById('zoom-out').onclick = () => { zoom /= 1.2; draw(); saveSession(); };
 document.getElementById('reset-view').onclick = () => { zoom = 1; panX = 0; panY = 0; draw(); saveSession(); };
@@ -575,13 +578,9 @@ canvas.addEventListener('mousedown', e => {
   if (e.button === 0 && mode === 'axes' && axisPoints.length < 4) {
     let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     if (orthogonalAxes.checked) {
-      if (axisPoints.length === 1) { // Snap X2 to X1's y
-        y = axisPoints[0].y;
-      } else if (axisPoints.length === 2) { // Snap Y1 to X1's x
-        x = axisPoints[0].x;
-      } else if (axisPoints.length === 3) { // Snap Y2 to Y1's x
-        x = axisPoints[2].x;
-      }
+      if (axisPoints.length === 1) y = axisPoints[0].y;
+      else if (axisPoints.length === 2) x = axisPoints[0].x;
+      else if (axisPoints.length === 3) x = axisPoints[2].x;
     }
     axisPoints.push({ x, y });
     axisInstruction.textContent = axisPoints.length < 4
@@ -656,9 +655,7 @@ canvas.addEventListener('mouseup', e => {
     let lineName = highlightLineName.value.trim() || `Highlighted Line ${lines.length + 1}`;
     if (lines.some(line => line.name === lineName)) {
       let suffix = 1;
-      while (lines.some(line => line.name === `${lineName} (${suffix})`)) {
-        suffix++;
-      }
+      while (lines.some(line => line.name === `${lineName} (${suffix})`)) suffix++;
       lineName = `${lineName} (${suffix})`;
     }
     lines.push({ name: lineName, points: [] });
@@ -1176,15 +1173,15 @@ exportXlsxBtn.addEventListener('click', () => {
   try {
     const workbook = XLSX.utils.book_new();
     lines.forEach(line => {
-      if (line.points.length === 0) return; // Skip empty lines
+      if (line.points.length === 0) return;
       const data = line.points.map(p => {
         const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15));
         const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15));
         return [dataX, dataY];
       });
-      data.unshift(['X', 'Y']); // Header
+      data.unshift(['X', 'Y']);
       const worksheet = XLSX.utils.aoa_to_sheet(data);
-      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_'); // Sanitize sheet name
+      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_');
       XLSX.utils.book_append_sheet(workbook, worksheet, safeName);
     });
     if (workbook.SheetNames.length === 0) {
@@ -1215,4 +1212,74 @@ undoBtn.addEventListener('click', () => {
     historyIndex--;
     const state = history[historyIndex];
     lines = JSON.parse(JSON.stringify(state.lines));
-    axisPoints
+    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
+    scaleX = state.scaleX;
+    scaleY = state.scaleY;
+    offsetX = state.offsetX;
+    offsetY = state.offsetY;
+    logX = state.logX;
+    logY = state.logY;
+    isCalibrated = state.isCalibrated;
+    zoom = state.zoom;
+    panX = state.panX;
+    panY = state.panY;
+    showGrid = state.showGrid;
+    mode = state.mode;
+    currentLineIndex = state.currentLineIndex;
+    magnifierZoom = state.magnifierZoom;
+    updateLineSelect();
+    updatePreview();
+    updateButtonStates();
+    toggleLogXBtn.classList.toggle('log-active', logX);
+    toggleLogYBtn.classList.toggle('log-active', logY);
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
+    draw();
+    saveSession();
+  }
+  undoBtn.disabled = historyIndex <= 0;
+  redoBtn.disabled = historyIndex >= history.length - 1;
+});
+
+redoBtn.addEventListener('click', () => {
+  if (historyIndex < history.length - 1) {
+    historyIndex++;
+    const state = history[historyIndex];
+    lines = JSON.parse(JSON.stringify(state.lines));
+    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
+    scaleX = state.scaleX;
+    scaleY = state.scaleY;
+    offsetX = state.offsetX;
+    offsetY = state.offsetY;
+    logX = state.logX;
+    logY = state.logY;
+    isCalibrated = state.isCalibrated;
+    zoom = state.zoom;
+    panX = state.panX;
+    panY = state.panY;
+    showGrid = state.showGrid;
+    mode = state.mode;
+    currentLineIndex = state.currentLineIndex;
+    magnifierZoom = state.magnifierZoom;
+    updateLineSelect();
+    updatePreview();
+    updateButtonStates();
+    toggleLogXBtn.classList.toggle('log-active', logX);
+    toggleLogYBtn.classList.toggle('log-active', logY);
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
+    draw();
+    saveSession();
+  }
+  undoBtn.disabled = historyIndex <= 0;
+  redoBtn.disabled = historyIndex >= history.length - 1;
+});
+
+/**********************
+ * INITIALIZATION
+ **********************/
+window.onload = () => {
+  if (document.body.classList.contains('dark') || localStorage.getItem('theme') === 'dark') {
+    document.body.classList.add('dark');
+  }
+  loadSession();
+  draw();
+};
