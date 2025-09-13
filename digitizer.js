@@ -457,24 +457,6 @@ document.addEventListener('imageLoaded', () => {
 /**********************
  * EVENT HANDLERS
  **********************/
-window.onload = () => {
-  const uploadBtn = document.getElementById('image-upload-btn');
-  if (!uploadBtn) {
-    console.error('Upload button not found in DOM');
-    showModal('Error: Upload button not found. Please refresh the page.');
-    return;
-  }
-  if (!imageUpload) {
-    console.error('Image upload input not found in DOM');
-    showModal('Error: Image upload input not found. Please refresh the page.');
-    return;
-  }
-  uploadBtn.addEventListener('click', () => {
-    console.log('Upload button clicked');
-    imageUpload.click();
-  });
-};
-
 imageUpload.addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) {
@@ -1247,39 +1229,4 @@ redoBtn.addEventListener('click', () => {
     lines = JSON.parse(JSON.stringify(state.lines));
     axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
     scaleX = state.scaleX;
-    scaleY = state.scaleY;
-    offsetX = state.offsetX;
-    offsetY = state.offsetY;
-    logX = state.logX;
-    logY = state.logY;
-    isCalibrated = state.isCalibrated;
-    zoom = state.zoom;
-    panX = state.panX;
-    panY = state.panY;
-    showGrid = state.showGrid;
-    mode = state.mode;
-    currentLineIndex = state.currentLineIndex;
-    magnifierZoom = state.magnifierZoom;
-    updateLineSelect();
-    updatePreview();
-    updateButtonStates();
-    toggleLogXBtn.classList.toggle('log-active', logX);
-    toggleLogYBtn.classList.toggle('log-active', logY);
-    document.getElementById('magnifier-zoom').value = magnifierZoom;
-    draw();
-    saveSession();
-  }
-  undoBtn.disabled = historyIndex <= 0;
-  redoBtn.disabled = historyIndex >= history.length - 1;
-});
-
-/**********************
- * INITIALIZATION
- **********************/
-window.onload = () => {
-  if (document.body.classList.contains('dark') || localStorage.getItem('theme') === 'dark') {
-    document.body.classList.add('dark');
-  }
-  loadSession();
-  draw();
-};
+    scaleY = state.scaleY
