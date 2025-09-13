@@ -22,6 +22,7 @@ html_content = f"""
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Graph Digitizer Pro</title>
   <style>{css}</style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
   <div id="container">
@@ -68,6 +69,7 @@ html_content = f"""
         <div id="highlight-controls">
           <p>Line Name: <input type="text" id="highlight-line-name" placeholder="Enter line name" title="Name for highlighted line"></p>
           <p>Points (n): <input type="number" id="n-points" value="5" min="1" title="Number of points to interpolate"></p>
+          <p>Brush Width: <input type="range" id="highlight-width" min="1" max="10" value="2" title="Adjust highlight brush width"></p>
           <button id="delete-highlight" title="Delete highlighted points">Delete Highlight</button>
         </div>
         <button id="clear-points" title="Clear all points in current line">Clear Points</button>
@@ -85,6 +87,7 @@ html_content = f"""
         <button id="import-json" title="Import JSON data">Import JSON</button>
         <button id="export-json" title="Export JSON data">Export JSON</button>
         <button id="export-csv" title="Export CSV data">Export CSV</button>
+        <button id="export-xlsx" title="Export XLSX data">Export XLSX</button>
         <button id="export-image" title="Export canvas image">Export Image</button>
         <button id="clear-session" title="Clear saved session">Clear Session</button>
         <button id="total-reset" title="Reset all calibration and data">Total Reset</button>
@@ -110,7 +113,6 @@ html_content = f"""
 </body>
 </html>
 """
-
 # Streamlit UI
 st.title("Graph Digitizer Pro - Streamlit Edition")
 st.markdown("Upload a graph image and digitize points by clicking on the canvas. Calibrate axes, add points, and export data as JSON or CSV.")
