@@ -3,7 +3,7 @@ import base64
 
 st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 
-# Load CSS and JS from files (or inline for simplicity)
+# Load CSS and JS from files
 with open("styles.css", "r") as f:
     css = f.read()
 with open("digitizer.js", "r") as f:
@@ -118,8 +118,8 @@ if uploaded_image:
     # Inject image into JS by adding a script to set img.src
     html_content = html_content.replace(
         '<script>',
-        f'<script>document.addEventListener("DOMContentLoaded", () => {{ document.getElementById("canvas").getContext("2d").img = new Image(); document.getElementById("canvas").getContext("2d").img.src = "{data_url}"; }});'
+        f'<script>document.addEventListener("DOMContentLoaded", () => {{ const img = new Image(); img.src = "{data_url}"; img.onload = () => {{ const canvas = document.getElementById("canvas"); canvas.width = Math.min(img.width, window.innerWidth * 0.8); canvas.height = canvas.width * (img.height / img.width); canvas.getContext("2d").img = img; document.dispatchEvent(new Event("imageLoaded")); }}; }});'
     )
 
 # Render HTML/JS app
-st.components.v1.html(html_content, height=
+st.components.v1.html(html_content, height=800, scrolling=True)
