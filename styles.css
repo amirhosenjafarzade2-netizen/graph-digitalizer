@@ -106,7 +106,7 @@ body.dark .section-desc {
   color: #aaa;
 }
 
-button, #image-upload-btn, #fallback-upload-btn {
+button, #image-upload-btn {
   display: block;
   width: 100%;
   padding: 10px;
@@ -120,12 +120,12 @@ button, #image-upload-btn, #fallback-upload-btn {
   transition: background-color 0.2s, transform 0.1s;
 }
 
-button:hover, #image-upload-btn:hover, #fallback-upload-btn:hover {
+button:hover, #image-upload-btn:hover {
   background-color: #0056b3;
   transform: translateY(-1px);
 }
 
-button:active, #image-upload-btn:active, #fallback-upload-btn:active {
+button:active, #image-upload-btn:active {
   transform: translateY(0);
 }
 
@@ -134,11 +134,11 @@ button:disabled {
   cursor: not-allowed;
 }
 
-body.dark button, body.dark #image-upload-btn, body.dark #fallback-upload-btn {
+body.dark button, body.dark #image-upload-btn {
   background-color: #66b3ff;
 }
 
-body.dark button:hover, body.dark #image-upload-btn:hover, body.dark #fallback-upload-btn:hover {
+body.dark button:hover, body.dark #image-upload-btn:hover {
   background-color: #4d94ff;
 }
 
