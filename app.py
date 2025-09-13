@@ -120,10 +120,10 @@ uploaded_image = st.file_uploader("Upload graph image (optional, overrides HTML 
 if uploaded_image:
     try:
         data_url = f"data:image/{uploaded_image.type.split('/')[-1]};base64,{base64.b64encode(uploaded_image.read()).decode()}"
-        # Inject image into JS by calling loadImage (defined in digitizer.js)
+        # Inject image into JS by calling loadImage after scripts are loaded
         html_content = html_content.replace(
-            '<script>',
-            f'<script>document.addEventListener("DOMContentLoaded", () => {{ loadImage("{data_url}"); }});'
+            '</body>',
+            f'<script>window.addEventListener("load", () => {{ loadImage("{data_url}"); }});</script></body>'
         )
         st.success("Image uploaded successfully. It should display in the canvas.")
     except Exception as e:
