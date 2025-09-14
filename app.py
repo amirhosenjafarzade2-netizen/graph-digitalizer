@@ -1,65 +1,16 @@
 import streamlit as st
-import base64
-import json
-import math
 
 st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 
-# Initialize session state
-if 'digitizer_state' not in st.session_state:
-    st.session_state.digitizer_state = {
-        'lines': [{'name': 'Line 1', 'points': []}],
-        'axisPoints': [],
-        'scaleX': None,
-        'scaleY': None,
-        'offsetX': None,
-        'offsetY': None,
-        'logX': False,
-        'logY': False,
-        'isCalibrated': False,
-        'zoom': 1,
-        'panX': 0,
-        'panY': 0,
-        'showGrid': False,
-        'mode': 'none',
-        'currentLineIndex': 0,
-        'magnifierZoom': 2,
-        'history': [],
-        'historyIndex': -1,
-        'image_data': None
-    }
-
-# Load CSS
+# Load CSS and JS from files
 try:
     with open("styles.css", "r") as f:
         css = f.read()
-except FileNotFoundError:
-    st.error("Error: Missing styles.css. Ensure it is in the same directory as app.py.")
-    st.stop()
-
-# Load JS
-try:
     with open("digitizer.js", "r") as f:
         js = f.read()
-except FileNotFoundError:
-    st.error("Error: Missing digitizer.js. Ensure it is in the same directory as app.py.")
+except FileNotFoundError as e:
+    st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
     st.stop()
-
-# Streamlit UI
-st.title("Graph Digitizer Pro")
-st.markdown("Upload a graph image, calibrate axes, digitize points, and export data as JSON or CSV.")
-
-# File uploader
-uploaded_file = st.file_uploader("Upload Graph Image", type=["jpg", "jpeg", "png"], key="image-upload")
-if uploaded_file:
-    try:
-        image_bytes = uploaded_file.read()
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-        st.session_state.digitizer_state['image_data'] = f"data:image/{uploaded_file.type.split('/')[-1]};base64,{image_base64}"
-        st.success("Image uploaded successfully!")
-    except Exception as e:
-        st.error(f"Failed to process image: {str(e)}. Please try a different image.")
-        st.session_state.digitizer_state['image_data'] = None
 
 # HTML content embedding CSS and JS
 html_content = f"""
@@ -80,7 +31,8 @@ html_content = f"""
       <div id="status-bar"></div>
     </div>
     <div id="controls" aria-label="Controls Panel">
-      <h3>Controls</h3>
+      <h3>Graph Digitizer Pro</h3>
+      <input type="file" id="image-upload" accept="image/*" title="Upload graph image">
       <details open>
         <summary>View</summary>
         <button id="zoom-in" title="Zoom In (+)">Zoom In</button>
@@ -129,6 +81,16 @@ html_content = f"""
         <button id="rename-line" title="Rename current line">Rename Line</button>
         <select id="line-select" title="Select active line"></select>
       </details>
+      <details open>
+        <summary>Data</summary>
+        <input type="file" id="import-json-input" accept=".json" style="display: none;">
+        <button id="import-json" title="Import JSON data">Import JSON</button>
+        <button id="export-json" title="Export JSON data">Export JSON</button>
+        <button id="export-csv" title="Export CSV data">Export CSV</button>
+        <button id="export-xlsx" title="Export XLSX data">Export XLSX</button>
+        <button id="clear-session" title="Clear saved session">Clear Session</button>
+        <button id="total-reset" title="Reset all calibration and data">Total Reset</button>
+      </details>
       <details>
         <summary>Preview Data</summary>
         <table id="preview-table"></table>
@@ -142,66 +104,14 @@ html_content = f"""
   </div>
   <div id="modal"><div id="modal-content"></div></div>
   <div id="spinner">Processing...</div>
-  <script>
-    // Pass session state to JavaScript
-    const initialState = {json.dumps(st.session_state.digitizer_state)};
-    {js}
-  </script>
+  <script>{js}</script>
 </body>
 </html>
 """
 
-# Export and session management buttons
-col1, col2, col3 = st.columns(3)
-with col1:
-    if st.button("Export JSON"):
-        st.download_button(
-            label="Download JSON",
-            data=json.dumps(st.session_state.digitizer_state),
-            file_name="graph.json",
-            mime="application/json"
-        )
-with col2:
-    if st.button("Export CSV"):
-        csv = ''
-        for line in st.session_state.digitizer_state['lines']:
-            csv += f'"{line["name"]}",\n'
-            csv += 'X,Y\n'
-            for p in line['points']:
-                dataX = 'NaN' if not isinstance(p.get('dataX'), (int, float)) or not math.isfinite(p['dataX']) else round(p['dataX'], 15)
-                dataY = 'NaN' if not isinstance(p.get('dataY'), (int, float)) or not math.isfinite(p['dataY']) else round(p['dataY'], 15)
-                csv += f'{dataX},{dataY}\n'
-            csv += '\n'
-        st.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name="graph.csv",
-            mime="text/csv"
-        )
-with col3:
-    if st.button("Clear Session"):
-        st.session_state.digitizer_state = {
-            'lines': [{'name': 'Line 1', 'points': []}],
-            'axisPoints': [],
-            'scaleX': None,
-            'scaleY': None,
-            'offsetX': None,
-            'offsetY': None,
-            'logX': False,
-            'logY': False,
-            'isCalibrated': False,
-            'zoom': 1,
-            'panX': 0,
-            'panY': 0,
-            'showGrid': False,
-            'mode': 'none',
-            'currentLineIndex': 0,
-            'magnifierZoom': 2,
-            'history': [],
-            'historyIndex': -1,
-            'image_data': st.session_state.digitizer_state['image_data']
-        }
-        st.rerun()
+# Streamlit UI
+st.title("Graph Digitizer Pro - Streamlit Edition")
+st.markdown("Upload a graph image using the control panel on the right, then digitize points by clicking on the canvas. Calibrate axes, add points, and export data as JSON, CSV, or XLSX.")
 
 # Render HTML/JS app
 st.components.v1.html(html_content, height=800, scrolling=True)
