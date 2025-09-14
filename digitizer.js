@@ -17,7 +17,6 @@ let highlightPath = [], isHighlighting = false;
 let isDraggingPoint = false;
 let highlightWidth = 2; // Default highlight brush width
 let magnifierZoom = 2; // Default magnifier zoom
-let lastHighlightPoint = null; // Track last added highlight point for smoothing
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels = ['X1', 'X2', 'Y1', 'Y2'];
 
@@ -291,7 +290,7 @@ function findNearestPointIndex(x, y) {
 /**********************
  * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
  **********************/
-function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.3) {
+function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
   const t2 = t * t;
   const t3 = t2 * t;
   const f1 = -tension * t3 + 2 * tension * t2 - tension * t;
@@ -304,7 +303,7 @@ function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.3) {
   };
 }
 
-function drawCatmullRomPath(ctx, points, segments = 50) {
+function drawCatmullRomPath(ctx, points, segments = 20) {
   if (points.length < 2) return;
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y);
@@ -404,7 +403,7 @@ const draw = debounce(() => {
     ctx.lineWidth = highlightWidth / zoom;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    drawCatmullRomPath(ctx, highlightPath);
+    drawCatmullRomPath(ctx, highlightPath, 20);
   }
 
   ctx.restore();
@@ -437,7 +436,7 @@ canvas.addEventListener('mousemove', e => {
     }
   }
 
-  // Snap to grid for smoother adjustments if grid is enabled and in add or adjust mode
+  // Snap to grid for smoother adjustments if grid is enabled and in adjust mode
   if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
@@ -515,22 +514,9 @@ canvas.addEventListener('mousemove', e => {
     draw();
   }
 
-  // Handle highlighting with smoothing
+  // Handle highlighting
   if (isHighlighting && mode === 'highlight') {
-    // Apply exponential moving average for smoothing
-    let smoothedX = x;
-    let smoothedY = y;
-    if (lastHighlightPoint) {
-      const alpha = 0.7; // Smoothing factor (0 to 1, higher = smoother)
-      smoothedX = alpha * lastHighlightPoint.x + (1 - alpha) * x;
-      smoothedY = alpha * lastHighlightPoint.y + (1 - alpha) * y;
-      // Only add point if it’s sufficiently far from the last point
-      const dist = Math.hypot(smoothedX - lastHighlightPoint.x, smoothedY - lastHighlightPoint.y);
-      if (dist < 2 / zoom) return; // Skip if too close (adjust threshold as needed)
-    }
-    const newPoint = { x: smoothedX, y: smoothedY };
-    highlightPath.push(newPoint);
-    lastHighlightPoint = newPoint;
+    highlightPath.push({ x, y });
     draw();
   }
 });
@@ -539,6 +525,43 @@ canvas.addEventListener('mouseleave', () => {
   magnifier.style.display = 'none';
   statusBar.textContent = `Mode: ${mode}`;
 });
+
+imageUpload.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) {
+    showModal('No file selected. Please choose an image.');
+    console.error('No file selected for image upload');
+    return;
+  }
+
+  const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
+  if (!validTypes.includes(file.type)) {
+    showModal('Invalid file type. Please upload a PNG, JPEG, GIF, or BMP image.');
+    console.error('Invalid file type:', file.type);
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    console.log('HTML input image read:', file.name);
+    loadImage(ev.target.result);
+  };
+  reader.onerror = () => {
+    showModal('Error reading file. Please try another image.');
+    console.error('FileReader error for file:', file.name);
+    showSpinner(false);
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('zoom-in').onclick = () => { zoom *= 1.2; draw(); saveSession(); };
+document.getElementById('zoom-out').onclick = () => { zoom /= 1.2; draw(); saveSession(); };
+document.getElementById('reset-view').onclick = () => { zoom = 1; panX = 0; panY = 0; draw(); saveSession(); };
+document.getElementById('pan-mode').onclick = () => {
+  isPanning = !isPanning;
+  canvas.style.cursor = isPanning ? 'move' : mode === 'highlight' ? 'crosshair' : 'default';
+  saveSession();
+};
 
 canvas.addEventListener('mousedown', e => {
   if (isPanning && e.buttons === 1) {
@@ -600,7 +623,6 @@ canvas.addEventListener('mousedown', e => {
     const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     isHighlighting = true;
     highlightPath = [{ x, y }];
-    lastHighlightPoint = { x, y };
     draw();
   }
 });
@@ -613,7 +635,6 @@ canvas.addEventListener('mouseup', e => {
     saveSession();
   } else if (e.button === 0 && mode === 'highlight' && isHighlighting) {
     isHighlighting = false;
-    lastHighlightPoint = null; // Reset last highlight point
     if (highlightPath.length < 2) {
       showModal('Highlight path is too short to save.');
       highlightPath = [];
@@ -646,7 +667,6 @@ canvas.addEventListener('mouseup', e => {
       lines[currentLineIndex].points.push({ x: p.x, y: p.y, dataX, dataY });
     });
     highlightPath = [];
-    lastHighlightPoint = null; // Reset after completing highlight
     updateLineSelect();
     updatePreview();
     draw();
@@ -903,7 +923,6 @@ totalResetBtn.addEventListener('click', () => {
     currentLineIndex = 0;
     highlightPath = [];
     isHighlighting = false;
-    lastHighlightPoint = null;
     mode = 'none';
     history = [];
     historyIndex = -1;
@@ -946,7 +965,6 @@ highlightLineBtn.addEventListener('click', () => {
 });
 deleteHighlightBtn.addEventListener('click', () => {
   highlightPath = [];
-  lastHighlightPoint = null;
   draw();
   saveState();
   saveSession();
@@ -1272,7 +1290,7 @@ redoBtn.addEventListener('click', () => {
       deletePointBtn.disabled = false;
       highlightLineBtn.disabled = false;
       clearPointsBtn.disabled = false;
-      sortPointsBtn.disabled = true; // Disable sortPointsBtn if no points
+      sortPointsBtn.disabled = false;
       newLineBtn.disabled = false;
       renameLineBtn.disabled = false;
     } else {
