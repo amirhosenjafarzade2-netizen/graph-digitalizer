@@ -425,6 +425,7 @@ canvas.addEventListener('mousemove', e => {
   let dataY = dataCoords ? dataCoords.dataY : y;
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
+  // Handle orthogonal axes snapping for axes mode
   if (mode === 'axes' && orthogonalAxes.checked) {
     if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
       y = axisPoints[0].y;
@@ -435,10 +436,56 @@ canvas.addEventListener('mousemove', e => {
     }
   }
 
+  // Snap to grid for smoother adjustments if grid is enabled and in adjust mode
+  if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
+    const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
+    const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
+    const yMin = logY ? Math.pow(10, (axisPoints[2].y - offsetY) / scaleY) : (axisPoints[2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
+    const xStep = (xMax - xMin) / 10;
+    const yStep = (yMax - yMin) / 10;
+
+    // Convert canvas coords to data coords for snapping
+    dataCoords = canvasToDataCoords(x, y);
+    if (dataCoords) {
+      let snappedDataX = Math.round(dataCoords.dataX / xStep) * xStep;
+      let snappedDataY = Math.round(dataCoords.dataY / yStep) * yStep;
+      // Convert snapped data coords back to canvas coords
+      x = logX ? Math.log10(snappedDataX) * scaleX + offsetX : snappedDataX * scaleX + offsetX;
+      y = logY ? Math.log10(snappedDataY) * scaleY + offsetY : snappedDataY * scaleY + offsetY;
+      // Update data coords for status bar and point updates
+      dataCoords = { dataX: snappedDataX, dataY: snappedDataY };
+      dataX = snappedDataX;
+      dataY = snappedDataY;
+    }
+  }
+
+  // Update magnifier position and content
   if (mode === 'axes' || mode === 'highlight' || mode === 'add' || mode === 'adjust' || mode === 'delete') {
     magnifier.style.display = 'block';
-    magnifier.style.left = `${e.clientX + 10}px`;
-    magnifier.style.top = `${e.clientY + 10}px`;
+    let magnifierX = e.clientX + 10;
+    let magnifierY = e.clientY + 10;
+
+    // Center the magnifier on the point being dragged in adjust mode
+    if (isDraggingPoint && mode === 'adjust') {
+      // Calculate the client coordinates that place the dragged point at the magnifier's center (50, 50)
+      const rect = canvas.getBoundingClientRect();
+      magnifierX = x * zoom + rect.left + panX - 50; // Center the point at magnifier's (50, 50)
+      magnifierY = y * zoom + rect.top + panY - 50;
+    } else {
+      // Default offset for other modes
+      magnifierX = e.clientX + 10;
+      magnifierY = e.clientY + 10;
+    }
+
+    // Ensure magnifier stays within window bounds
+    magnifierX = Math.max(0, Math.min(magnifierX, window.innerWidth - magnifier.width));
+    magnifierY = Math.max(0, Math.min(magnifierY, window.innerHeight - magnifier.height));
+
+    magnifier.style.left = `${magnifierX}px`;
+    magnifier.style.top = `${magnifierY}px`;
+
+    // Draw magnifier content
     magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
     magCtx.drawImage(
       canvas,
@@ -457,8 +504,8 @@ canvas.addEventListener('mousemove', e => {
     magCtx.stroke();
   }
 
+  // Handle point dragging in adjust mode
   if (isDraggingPoint && mode === 'adjust') {
-    let dataCoords = canvasToDataCoords(x, y);
     if (!dataCoords) return;
     const { dataX, dataY } = dataCoords;
     lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY };
@@ -467,6 +514,7 @@ canvas.addEventListener('mousemove', e => {
     draw();
   }
 
+  // Handle highlighting
   if (isHighlighting && mode === 'highlight') {
     highlightPath.push({ x, y });
     draw();
