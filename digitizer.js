@@ -123,7 +123,7 @@ function loadSession() {
       currentLineIndex = state.currentLineIndex || 0;
       magnifierZoom = state.magnifierZoom || 2;
       updateLineSelect();
-      debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+      debouncedUpdatePreview();
       updateButtonStates();
       toggleLogXBtn.classList.toggle('log-active', logX);
       toggleLogYBtn.classList.toggle('log-active', logY);
@@ -147,7 +147,6 @@ function loadSession() {
 }
 
 function saveState() {
-  // REFINEMENT: Skip save if no changes
   const currentState = JSON.stringify({
     lines, axisPoints, scaleX, scaleY, offsetX, offsetY, logX, logY, isCalibrated,
     zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom
@@ -182,7 +181,7 @@ function debounce(func, wait) {
  **********************/
 function loadImage(dataUrl) {
   showSpinner(true);
-  img.src = ''; // Clear previous image
+  img.src = '';
   img.src = dataUrl;
   img.onload = () => {
     console.log('Image loaded successfully:', { width: img.width, height: img.height, src: dataUrl });
@@ -252,7 +251,6 @@ function updateLineSelect() {
   lineSelect.value = currentLineIndex;
 }
 
-// REFINEMENT: Debounce preview updates for smoothness
 const debouncedUpdatePreview = debounce(updatePreview, 200);
 
 function updatePreview() {
@@ -295,7 +293,6 @@ function findNearestPointIndex(x, y) {
  * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
  **********************/
 function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
-  // REFINEMENT: Precompute t2 and t3 for efficiency
   const t2 = t * t;
   const t3 = t2 * t;
   const f1 = -tension * t3 + 2 * tension * t2 - tension * t;
@@ -329,10 +326,10 @@ function drawCatmullRomPath(ctx, points, segments = 20) {
 /**********************
  * DRAWING LOOP
  **********************/
-let lastDrawTime = 0; // REFINEMENT: Throttle draw for smoothness
+let lastDrawTime = 0;
 const draw = debounce(() => {
   const now = Date.now();
-  if (now - lastDrawTime < 16 && mode !== 'none') { // Skip redundant draws in interactive modes
+  if (now - lastDrawTime < 16 && mode !== 'none') {
     requestAnimationFrame(draw);
     return;
   }
@@ -343,7 +340,6 @@ const draw = debounce(() => {
   ctx.translate(panX, panY);
   ctx.scale(zoom, zoom);
 
-  // Draw image only if loaded
   if (img.src && img.complete && img.naturalWidth > 0) {
     try {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -359,7 +355,6 @@ const draw = debounce(() => {
     ctx.fillText(img.src ? 'Loading image...' : 'No image loaded. Please upload an image.', 10, 20);
   }
 
-  // Draw grid
   if (isCalibrated && showGrid) {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
     ctx.lineWidth = 1 / zoom;
@@ -385,7 +380,6 @@ const draw = debounce(() => {
     }
   }
 
-  // Draw axis points
   ctx.fillStyle = 'red';
   ctx.font = `${12 / zoom}px Arial`;
   axisPoints.forEach((p, i) => {
@@ -395,7 +389,6 @@ const draw = debounce(() => {
     ctx.fillText(axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom);
   });
 
-  // Draw points
   lines.forEach((line, lineIdx) => {
     ctx.fillStyle = lineColors[lineIdx % lineColors.length];
     line.points.forEach((p, i) => {
@@ -410,7 +403,6 @@ const draw = debounce(() => {
     });
   });
 
-  // Draw highlight path with Catmull-Rom spline
   if (highlightPath.length > 1) {
     ctx.strokeStyle = 'yellow';
     ctx.lineWidth = highlightWidth / zoom;
@@ -422,7 +414,6 @@ const draw = debounce(() => {
   ctx.restore();
 }, 16);
 
-// Listen for imageLoaded event to trigger redraw
 document.addEventListener('imageLoaded', () => {
   console.log('imageLoaded event triggered');
   draw();
@@ -431,28 +422,30 @@ document.addEventListener('imageLoaded', () => {
 /**********************
  * EVENT HANDLERS
  **********************/
-const debouncedUpdateMagnifier = debounce((clientX, clientY) => { // REFINEMENT: Debounce magnifier
-  const { x, y } = imageToCanvasCoords(clientX, clientY);
-  magnifier.style.display = 'block';
-  magnifier.style.left = `${clientX + 10}px`;
-  magnifier.style.top = `${clientY + 10}px`;
-  magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
-  magCtx.drawImage(
-    canvas,
-    x - 25 / magnifierZoom,
-    y - 25 / magnifierZoom,
-    50 / magnifierZoom,
-    50 / magnifierZoom,
-    0, 0, 100, 100
-  );
-  magCtx.beginPath();
-  magCtx.moveTo(50, 0);
-  magCtx.lineTo(50, 100);
-  magCtx.moveTo(0, 50);
-  magCtx.lineTo(100, 50);
-  magCtx.strokeStyle = 'red';
-  magCtx.stroke();
-}, 50);
+function updateMagnifier(clientX, clientY, x, y) {
+  // Use requestAnimationFrame for smoother magnifier updates
+  requestAnimationFrame(() => {
+    magnifier.style.display = 'block';
+    magnifier.style.left = `${clientX + 10}px`;
+    magnifier.style.top = `${clientY + 10}px`;
+    magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
+    magCtx.drawImage(
+      canvas,
+      x - 25 / magnifierZoom,
+      y - 25 / magnifierZoom,
+      50 / magnifierZoom,
+      50 / magnifierZoom,
+      0, 0, 100, 100
+    );
+    magCtx.beginPath();
+    magCtx.moveTo(50, 0);
+    magCtx.lineTo(50, 100);
+    magCtx.moveTo(0, 50);
+    magCtx.lineTo(100, 50);
+    magCtx.strokeStyle = 'red';
+    magCtx.stroke();
+  });
+}
 
 canvas.addEventListener('mousemove', e => {
   let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
@@ -462,21 +455,21 @@ canvas.addEventListener('mousemove', e => {
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
   if (mode === 'axes' && orthogonalAxes.checked) {
-    if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
+    if (axisPoints.length === 1) {
       y = axisPoints[0].y;
-    } else if (axisPoints.length === 2) { // Snapping Y1 to X1's x-coordinate
+    } else if (axisPoints.length === 2) {
       x = axisPoints[0].x;
-    } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
+    } else if (axisPoints.length === 3) {
       x = axisPoints[2].x;
     }
   }
 
   if (mode === 'axes' || mode === 'highlight' || mode === 'add' || mode === 'adjust' || mode === 'delete') {
-    debouncedUpdateMagnifier(e.clientX, e.clientY); // REFINEMENT: Use debounced magnifier
+    updateMagnifier(e.clientX, e.clientY, x, y); // Reverted to non-debounced for smoothness
   }
 
   if (isDraggingPoint && mode === 'adjust') {
-    debouncedDragUpdate(e); // REFINEMENT: Use debounced drag
+    debouncedDragUpdate(e);
   }
 
   if (isHighlighting && mode === 'highlight') {
@@ -485,7 +478,6 @@ canvas.addEventListener('mousemove', e => {
   }
 });
 
-// REFINEMENT: Debounced drag for smoother point adjustment
 const debouncedDragUpdate = debounce((e) => {
   const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
   let dataCoords = canvasToDataCoords(x, y);
@@ -494,7 +486,7 @@ const debouncedDragUpdate = debounce((e) => {
   lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY };
   console.log(`Adjusting point ${selectedPointIndex}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
   debouncedUpdatePreview();
-  requestAnimationFrame(draw); // REFINEMENT: Use RAF for smooth redraw
+  requestAnimationFrame(draw);
 }, 16);
 
 canvas.addEventListener('mouseleave', () => {
@@ -549,11 +541,11 @@ canvas.addEventListener('mousedown', e => {
   if (e.button === 0 && mode === 'axes' && axisPoints.length < 4) {
     let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     if (orthogonalAxes.checked) {
-      if (axisPoints.length === 1) { // Snap X2 to X1's y
+      if (axisPoints.length === 1) {
         y = axisPoints[0].y;
-      } else if (axisPoints.length === 2) { // Snap Y1 to X1's x
+      } else if (axisPoints.length === 2) {
         x = axisPoints[0].x;
-      } else if (axisPoints.length === 3) { // Snap Y2 to Y1's x
+      } else if (axisPoints.length === 3) {
         x = axisPoints[2].x;
       }
     }
@@ -575,7 +567,7 @@ canvas.addEventListener('mousedown', e => {
     const { dataX, dataY } = dataCoords;
     console.log(`Adding point: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     lines[currentLineIndex].points.push({ x, y, dataX, dataY });
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     draw();
     saveState();
     saveSession();
@@ -584,7 +576,7 @@ canvas.addEventListener('mousedown', e => {
     const index = findNearestPointIndex(x, y);
     if (index !== -1) {
       lines[currentLineIndex].points.splice(index, 1);
-      debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+      debouncedUpdatePreview();
       draw();
       saveState();
       saveSession();
@@ -644,7 +636,7 @@ canvas.addEventListener('mouseup', e => {
     });
     highlightPath = [];
     updateLineSelect();
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     draw();
     saveState();
     saveSession();
@@ -786,7 +778,7 @@ calibrateBtn.addEventListener('click', () => {
   saveState();
   saveSession();
   draw();
-  debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+  debouncedUpdatePreview();
 
   lines.forEach(line => {
     line.points.forEach(p => {
@@ -798,7 +790,7 @@ calibrateBtn.addEventListener('click', () => {
       }
     });
   });
-  debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+  debouncedUpdatePreview();
 });
 
 toggleGridBtn.addEventListener('click', () => {
@@ -838,7 +830,7 @@ toggleLogXBtn.addEventListener('click', () => {
         }
       });
     });
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     draw();
     saveState();
     saveSession();
@@ -875,7 +867,7 @@ toggleLogYBtn.addEventListener('click', () => {
         }
       });
     });
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     draw();
     saveState();
     saveSession();
@@ -920,7 +912,7 @@ totalResetBtn.addEventListener('click', () => {
     redoBtn.disabled = true;
     highlightControls.style.display = 'none';
     updateLineSelect();
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     updateButtonStates();
     localStorage.removeItem('digitizerState');
     draw();
@@ -948,7 +940,7 @@ deleteHighlightBtn.addEventListener('click', () => {
 
 clearPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points = [];
-  debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+  debouncedUpdatePreview();
   draw();
   saveState();
   saveSession();
@@ -956,7 +948,7 @@ clearPointsBtn.addEventListener('click', () => {
 
 sortPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points.sort((a, b) => a.dataX - b.dataX);
-  debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+  debouncedUpdatePreview();
   draw();
   saveState();
   saveSession();
@@ -1022,7 +1014,7 @@ newLineBtn.addEventListener('click', () => {
     lines.push({ name, points: [] });
     currentLineIndex = lines.length - 1;
     updateLineSelect();
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     draw();
     saveState();
     saveSession();
@@ -1041,7 +1033,7 @@ renameLineBtn.addEventListener('click', () => {
     }
     lines[currentLineIndex].name = name;
     updateLineSelect();
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     saveState();
     saveSession();
   });
@@ -1049,7 +1041,7 @@ renameLineBtn.addEventListener('click', () => {
 
 lineSelect.addEventListener('change', () => {
   currentLineIndex = parseInt(lineSelect.value);
-  debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+  debouncedUpdatePreview();
   draw();
   saveSession();
 });
@@ -1088,7 +1080,7 @@ importJsonInput.addEventListener('change', e => {
         history = [];
         historyIndex = -1;
         updateLineSelect();
-        debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+        debouncedUpdatePreview();
         updateButtonStates();
         toggleLogXBtn.classList.toggle('log-active', logX);
         toggleLogYBtn.classList.toggle('log-active', logY);
@@ -1144,17 +1136,16 @@ exportXlsxBtn.addEventListener('click', () => {
   try {
     const workbook = XLSX.utils.book_new();
     lines.forEach(line => {
-      if (line.points.length === 0) return; // Skip empty lines
-      // REFINEMENT: Sort points by dataX ascending for Excel output
+      if (line.points.length === 0) return;
       const sortedPoints = [...line.points].sort((a, b) => a.dataX - b.dataX);
       const data = sortedPoints.map(p => {
         const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15));
         const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15));
         return [dataX, dataY];
       });
-      data.unshift(['X', 'Y']); // Header
+      data.unshift(['X', 'Y']);
       const worksheet = XLSX.utils.aoa_to_sheet(data);
-      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_'); // Sanitize sheet name
+      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_');
       XLSX.utils.book_append_sheet(workbook, worksheet, safeName);
     });
     if (workbook.SheetNames.length === 0) {
@@ -1204,7 +1195,7 @@ undoBtn.addEventListener('click', () => {
     toggleLogYBtn.classList.toggle('log-active', logY);
     document.getElementById('magnifier-zoom').value = magnifierZoom;
     updateLineSelect();
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     updateButtonStates();
     if (isCalibrated) {
       addPointBtn.disabled = false;
@@ -1259,7 +1250,7 @@ redoBtn.addEventListener('click', () => {
     toggleLogYBtn.classList.toggle('log-active', logY);
     document.getElementById('magnifier-zoom').value = magnifierZoom;
     updateLineSelect();
-    debouncedUpdatePreview(); // REFINEMENT: Use debounced version
+    debouncedUpdatePreview();
     updateButtonStates();
     if (isCalibrated) {
       addPointBtn.disabled = false;
