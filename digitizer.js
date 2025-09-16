@@ -89,45 +89,531 @@ function showModal(msg, withInput = false, callback = null) {
   btnContainer.appendChild(cancelBtn);
   content.appendChild(btnContainer);
   modal.style.display = 'flex';
-  if (withInput) document.getElementById('modal-input').focus();
 }
 
-function showSpinner(on) { document.getElementById('spinner').style.display = on ? 'block' : 'none'; }
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left - panX) / zoom,
+    y: (e.clientY - rect.top - panY) / zoom
+  };
+}
+
+function toRealX(px) {
+  if (logX) {
+    return Math.exp((px - offsetX) / scaleX);
+  }
+  return (px - offsetX) / scaleX;
+}
+
+function toRealY(py) {
+  if (logY) {
+    return Math.exp((py - offsetY) / scaleY);
+  }
+  return (py - offsetY) / scaleY;
+}
+
+function toPixelX(rx) {
+  if (logX) {
+    return offsetX + scaleX * Math.log(rx);
+  }
+  return offsetX + scaleX * rx;
+}
+
+function toPixelY(ry) {
+  if (logY) {
+    return offsetY + scaleY * Math.log(ry);
+  }
+  return offsetY + scaleY * ry;
+}
+
+function draw() {
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.translate(panX, panY);
+  ctx.scale(zoom, zoom);
+  ctx.drawImage(img, 0, 0, canvas.width / zoom, canvas.height / zoom);
+  // Draw axis points
+  axisPoints.forEach((pt, i) => {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 5 / zoom, 0, 2 * Math.PI);
+    ctx.fillStyle = 'red';
+    ctx.fill();
+    ctx.font = '12px Arial';
+    ctx.fillText(axisLabels[i], pt.x + 5, pt.y - 5);
+  });
+  // Draw grid if shown
+  if (showGrid && isCalibrated) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1 / zoom;
+    // Horizontal lines
+    for (let y = Math.floor(toRealY(img.height)); y <= Math.ceil(toRealY(0)); y += (toRealY(0) - toRealY(img.height)) / 10) {
+      ctx.beginPath();
+      ctx.moveTo(0, toPixelY(y));
+      ctx.lineTo(img.width, toPixelY(y));
+      ctx.stroke();
+    }
+    // Vertical lines
+    for (let x = Math.floor(toRealX(0)); x <= Math.ceil(toRealX(img.width)); x += (toRealX(img.width) - toRealX(0)) / 10) {
+      ctx.beginPath();
+      ctx.moveTo(toPixelX(x), 0);
+      ctx.lineTo(toPixelX(x), img.height);
+      ctx.stroke();
+    }
+  }
+  // Draw points
+  lines.forEach((line, lineIdx) => {
+    line.points.forEach((pt, idx) => {
+      ctx.beginPath();
+      ctx.arc(pt.px, pt.py, 3 / zoom, 0, 2 * Math.PI);
+      ctx.fillStyle = lineIdx === currentLineIndex ? 'yellow' : lineColors[lineIdx % lineColors.length];
+      ctx.fill();
+    });
+  });
+  // Draw highlight path if highlighting
+  if (isHighlighting) {
+    ctx.strokeStyle = 'yellow';
+    ctx.lineWidth = highlightWidth / zoom;
+    ctx.beginPath();
+    highlightPath.forEach((pt, i) => {
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    });
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function updatePreview() {
+  previewTable.innerHTML = '';
+  const thead = document.createElement('thead');
+  const tr = document.createElement('tr');
+  ['Line', 'X', 'Y'].forEach(text => {
+    const th = document.createElement('th');
+    th.textContent = text;
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr);
+  previewTable.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  lines.forEach(line => {
+    line.points.forEach(pt => {
+      const row = document.createElement('tr');
+      [line.name, pt.x.toFixed(2), pt.y.toFixed(2)].forEach(text => {
+        const td = document.createElement('td');
+        td.textContent = text;
+        row.appendChild(td);
+      });
+      tbody.appendChild(row);
+    });
+  });
+  previewTable.appendChild(tbody);
+}
+
+function updateButtonStates() {
+  [addPointBtn, adjustPointBtn, deletePointBtn, highlightLineBtn].forEach(btn => btn.classList.remove('active'));
+  if (mode === 'add') addPointBtn.classList.add('active');
+  if (mode === 'adjust') adjustPointBtn.classList.add('active');
+  if (mode === 'delete') deletePointBtn.classList.add('active');
+  if (mode === 'highlight') highlightLineBtn.classList.add('active');
+  toggleGridBtn.classList.toggle('active', showGrid);
+  toggleLogXBtn.classList.toggle('log-active', logX);
+  toggleLogYBtn.classList.toggle('log-active', logY);
+}
+
+function updateLineSelect() {
+  lineSelect.innerHTML = '';
+  lines.forEach((line, idx) => {
+    const option = document.createElement('option');
+    option.value = idx;
+    option.textContent = line.name;
+    lineSelect.appendChild(option);
+  });
+  lineSelect.value = currentLineIndex;
+}
+
+function saveState() {
+  if (historyIndex < history.length - 1) history = history.slice(0, historyIndex + 1);
+  history.push({
+    lines: JSON.parse(JSON.stringify(lines)),
+    axisPoints: JSON.parse(JSON.stringify(axisPoints)),
+    scaleX, scaleY, offsetX, offsetY, logX, logY, isCalibrated,
+    zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom
+  });
+  historyIndex = history.length - 1;
+  undoBtn.disabled = historyIndex <= 0;
+  redoBtn.disabled = historyIndex >= history.length - 1;
+  saveSession();
+}
 
 function saveSession() {
-  localStorage.setItem('digitizerState', JSON.stringify({
-    lines, axisPoints, scaleX, scaleY, offsetX, offsetY, logX, logY, isCalibrated,
-    zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom
-  }));
+  const state = history[historyIndex];
+  localStorage.setItem('digitizerState', JSON.stringify(state));
+  localStorage.setItem('imgSrc', img.src);
 }
 
 function loadSession() {
-  const s = localStorage.getItem('digitizerState');
-  if (s) {
-    try {
-      const state = JSON.parse(s);
-      lines = state.lines || [{ name: 'Line 1', points: [] }];
-      axisPoints = state.axisPoints || [];
+  const savedState = localStorage.getItem('digitizerState');
+  if (savedState) {
+    const state = JSON.parse(savedState);
+    lines = state.lines;
+    axisPoints = state.axisPoints;
+    scaleX = state.scaleX;
+    scaleY = state.scaleY;
+    offsetX = state.offsetX;
+    offsetY = state.offsetY;
+    logX = state.logX;
+    logY = state.logY;
+    isCalibrated = state.isCalibrated;
+    zoom = state.zoom;
+    panX = state.panX;
+    panY = state.panY;
+    showGrid = state.showGrid;
+    mode = state.mode;
+    currentLineIndex = state.currentLineIndex;
+    magnifierZoom = state.magnifierZoom;
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
+    toggleLogXBtn.classList.toggle('log-active', logX);
+    toggleLogYBtn.classList.toggle('log-active', logY);
+    updateLineSelect();
+    updatePreview();
+    updateButtonStates();
+    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
+    calibrateBtn.disabled = axisPoints.length !== 4;
+    if (isCalibrated) {
+      addPointBtn.disabled = false;
+      adjustPointBtn.disabled = false;
+      deletePointBtn.disabled = false;
+      highlightLineBtn.disabled = false;
+      clearPointsBtn.disabled = false;
+      sortPointsBtn.disabled = false;
+      newLineBtn.disabled = false;
+      renameLineBtn.disabled = false;
+    } else {
+      addPointBtn.disabled = true;
+      adjustPointBtn.disabled = true;
+      deletePointBtn.disabled = true;
+      highlightLineBtn.disabled = true;
+      clearPointsBtn.disabled = true;
+      sortPointsBtn.disabled = true;
+      newLineBtn.disabled = true;
+      renameLineBtn.disabled = true;
+    }
+    const savedImg = localStorage.getItem('imgSrc');
+    if (savedImg) {
+      img.src = savedImg;
+      img.onload = draw;
+    }
+    history = [state];
+    historyIndex = 0;
+    undoBtn.disabled = true;
+    redoBtn.disabled = true;
+  }
+}
+
+/**********************
+ * EVENT LISTENERS
+ **********************/
+
+// Image upload
+imageUpload.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      img.src = ev.target.result;
+      img.onload = () => {
+        canvas.width = Math.min(img.width, window.innerWidth * 0.8);
+        canvas.height = canvas.width * (img.height / img.width);
+        draw();
+        saveSession();
+      };
+    };
+    reader.readAsDataURL(file);
+  }
+});
+
+// Zoom in
+document.getElementById('zoom-in').addEventListener('click', () => {
+  zoom *= 1.2;
+  draw();
+  saveState();
+});
+
+// Zoom out
+document.getElementById('zoom-out').addEventListener('click', () => {
+  zoom /= 1.2;
+  draw();
+  saveState();
+});
+
+// Reset view
+document.getElementById('reset-view').addEventListener('click', () => {
+  zoom = 1;
+  panX = 0;
+  panY = 0;
+  draw();
+  saveState();
+});
+
+// Toggle pan
+document.getElementById('pan-mode').addEventListener('click', () => {
+  isPanning = !isPanning;
+  canvas.style.cursor = isPanning ? 'grab' : 'crosshair';
+});
+
+// Toggle theme
+document.getElementById('toggle-theme').addEventListener('click', () => {
+  document.body.classList.toggle('dark');
+  localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+});
+
+// Magnifier zoom slider
+document.getElementById('magnifier-zoom').addEventListener('input', e => {
+  magnifierZoom = parseInt(e.target.value);
+  saveState();
+});
+
+// Set axes
+setAxesBtn.addEventListener('click', () => {
+  mode = 'axes';
+  axisPoints = [];
+  axisInstruction.textContent = `Click point for ${axisLabels[0]} on the chart.`;
+  axisInputs.style.display = 'none';
+  calibrateBtn.disabled = true;
+  canvas.style.cursor = 'crosshair';
+});
+
+// Reset axis points
+resetAxisPointsBtn.addEventListener('click', () => {
+  axisPoints = [];
+  mode = 'none';
+  axisInstruction.textContent = 'Click "Set Axis Points" then enter values.';
+  axisInputs.style.display = 'none';
+  draw();
+  saveState();
+});
+
+// Calibrate
+calibrateBtn.addEventListener('click', () => {
+  let x1 = parseFloat(document.getElementById('x1-value').value);
+  let x2 = parseFloat(document.getElementById('x2-value').value);
+  let y1 = parseFloat(document.getElementById('y1-value').value);
+  let y2 = parseFloat(document.getElementById('y2-value').value);
+  if (isNaN(x1) || isNaN(x2) || isNaN(y1) || isNaN(y2)) {
+    showModal('Please enter valid axis values.');
+    return;
+  }
+  if (logX && (x1 <= 0 || x2 <= 0)) {
+    showModal('Log scale values must be positive.');
+    return;
+  }
+  if (logY && (y1 <= 0 || y2 <= 0)) {
+    showModal('Log scale values must be positive.');
+    return;
+  }
+  if (orthogonalAxes.checked) {
+    // Force orthogonal
+    const dx = axisPoints[1].x - axisPoints[0].x;
+    const dy = axisPoints[1].y - axisPoints[0].y;
+    axisPoints[2].x = axisPoints[0].x - dy;
+    axisPoints[2].y = axisPoints[0].y + dx;
+    axisPoints[3].x = axisPoints[1].x - dy;
+    axisPoints[3].y = axisPoints[1].y + dx;
+  }
+  const px1 = axisPoints[0].x, px2 = axisPoints[1].x;
+  const py1 = axisPoints[2].y, py2 = axisPoints[3].y; // Y inverted?
+  offsetX = px1;
+  offsetY = py1;
+  scaleX = (px2 - px1) / (x2 - x1);
+  scaleY = (py2 - py1) / (y2 - y1);
+  if (logX) {
+    scaleX = (px2 - px1) / (Math.log(x2) - Math.log(x1));
+  }
+  if (logY) {
+    scaleY = (py2 - py1) / (Math.log(y2) - Math.log(y1));
+  }
+  isCalibrated = true;
+  mode = 'none';
+  axisInstruction.textContent = 'Calibration complete. Select a mode to digitize.';
+  axisInputs.style.display = 'none';
+  addPointBtn.disabled = false;
+  adjustPointBtn.disabled = false;
+  deletePointBtn.disabled = false;
+  highlightLineBtn.disabled = false;
+  clearPointsBtn.disabled = false;
+  sortPointsBtn.disabled = false;
+  newLineBtn.disabled = false;
+  renameLineBtn.disabled = false;
+  draw();
+  saveState();
+});
+
+// Reset calibration
+resetCalibrationBtn.addEventListener('click', () => {
+  isCalibrated = false;
+  logX = false;
+  logY = false;
+  axisPoints = [];
+  lines.forEach(line => line.points = []);
+  mode = 'none';
+  axisInstruction.textContent = 'Click "Set Axis Points" then enter values.';
+  toggleLogXBtn.classList.remove('log-active');
+  toggleLogYBtn.classList.remove('log-active');
+  addPointBtn.disabled = true;
+  adjustPointBtn.disabled = true;
+  deletePointBtn.disabled = true;
+  highlightLineBtn.disabled = true;
+  clearPointsBtn.disabled = true;
+  sortPointsBtn.disabled = true;
+  newLineBtn.disabled = true;
+  renameLineBtn.disabled = true;
+  updatePreview();
+  updateButtonStates();
+  draw();
+  saveState();
+});
+
+// Toggle grid
+toggleGridBtn.addEventListener('click', () => {
+  showGrid = !showGrid;
+  updateButtonStates();
+  draw();
+  saveState();
+});
+
+// Toggle log X
+toggleLogXBtn.addEventListener('click', () => {
+  logX = !logX;
+  updateButtonStates();
+  saveState();
+});
+
+// Toggle log Y
+toggleLogYBtn.addEventListener('click', () => {
+  logY = !logY;
+  updateButtonStates();
+  saveState();
+});
+
+// Add point mode
+addPointBtn.addEventListener('click', () => {
+  mode = mode === 'add' ? 'none' : 'add';
+  updateButtonStates();
+});
+
+// Adjust point mode
+adjustPointBtn.addEventListener('click', () => {
+  mode = mode === 'adjust' ? 'none' : 'adjust';
+  updateButtonStates();
+});
+
+// Delete point mode
+deletePointBtn.addEventListener('click', () => {
+  mode = mode === 'delete' ? 'none' : 'delete';
+  updateButtonStates();
+});
+
+// Highlight line mode
+highlightLineBtn.addEventListener('click', () => {
+  mode = mode === 'highlight' ? 'none' : 'highlight';
+  highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
+  updateButtonStates();
+});
+
+// Delete highlight
+deleteHighlightBtn.addEventListener('click', () => {
+  highlightPath = [];
+  draw();
+});
+
+// Clear points
+clearPointsBtn.addEventListener('click', () => {
+  lines[currentLineIndex].points = [];
+  updatePreview();
+  draw();
+  saveState();
+});
+
+// Sort points
+sortPointsBtn.addEventListener('click', () => {
+  lines[currentLineIndex].points.sort((a, b) => a.x - b.x);
+  updatePreview();
+  draw();
+  saveState();
+});
+
+// New line
+newLineBtn.addEventListener('click', () => {
+  showModal('Enter line name:', true, name => {
+    if (name && !lines.some(l => l.name === name)) {
+      lines.push({ name, points: [] });
+      currentLineIndex = lines.length - 1;
+      updateLineSelect();
+      saveState();
+    } else {
+      showModal('Name already exists or invalid.');
+    }
+  });
+});
+
+// Rename line
+renameLineBtn.addEventListener('click', () => {
+  showModal('Enter new name:', true, name => {
+    if (name && !lines.some(l => l.name === name)) {
+      lines[currentLineIndex].name = name;
+      updateLineSelect();
+      updatePreview();
+      saveState();
+    } else {
+      showModal('Name already exists or invalid.');
+    }
+  });
+});
+
+// Line select
+lineSelect.addEventListener('change', e => {
+  currentLineIndex = parseInt(e.target.value);
+  draw();
+  saveState();
+});
+
+// Import JSON
+importJsonBtn.addEventListener('click', () => {
+  importJsonInput.click();
+});
+importJsonInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const state = JSON.parse(ev.target.result);
+      lines = state.lines;
+      axisPoints = state.axisPoints;
       scaleX = state.scaleX;
       scaleY = state.scaleY;
       offsetX = state.offsetX;
       offsetY = state.offsetY;
-      logX = state.logX || false;
-      logY = state.logY || false;
-      isCalibrated = state.isCalibrated || false;
-      zoom = state.zoom || 1;
-      panX = state.panX || 0;
-      panY = state.panY || 0;
-      showGrid = state.showGrid || false;
-      mode = state.mode || 'none';
-      currentLineIndex = state.currentLineIndex || 0;
-      magnifierZoom = state.magnifierZoom || 2;
-      updateLineSelect();
-      updatePreview();
-      updateButtonStates();
+      logX = state.logX;
+      logY = state.logY;
+      isCalibrated = state.isCalibrated;
+      zoom = state.zoom;
+      panX = state.panX;
+      panY = state.panY;
+      showGrid = state.showGrid;
+      mode = state.mode;
+      currentLineIndex = state.currentLineIndex;
+      magnifierZoom = state.magnifierZoom;
       toggleLogXBtn.classList.toggle('log-active', logX);
       toggleLogYBtn.classList.toggle('log-active', logY);
       document.getElementById('magnifier-zoom').value = magnifierZoom;
+      updateLineSelect();
+      updatePreview();
+      updateButtonStates();
+      axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
+      axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
+      calibrateBtn.disabled = axisPoints.length !== 4;
       if (isCalibrated) {
         addPointBtn.disabled = false;
         adjustPointBtn.disabled = false;
@@ -139,592 +625,84 @@ function loadSession() {
         renameLineBtn.disabled = false;
       }
       draw();
-    } catch (e) {
-      console.error('Failed to load session:', e);
-      showModal('Failed to load session. Starting fresh.');
-    }
-  }
-}
-
-function saveState() {
-  history = history.slice(0, historyIndex + 1);
-  history.push({
-    lines: JSON.parse(JSON.stringify(lines)),
-    axisPoints: JSON.parse(JSON.stringify(axisPoints)),
-    scaleX, scaleY, offsetX, offsetY,
-    logX, logY, isCalibrated,
-    zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom
-  });
-  historyIndex++;
-  undoBtn.disabled = historyIndex <= 0;
-  redoBtn.disabled = historyIndex >= history.length - 1;
-  saveSession();
-}
-
-function download(filename, text, mimeType) {
-  const a = document.createElement('a');
-  a.href = `data:${mimeType};charset=utf-8,${encodeURIComponent(text)}`;
-  a.download = filename;
-  a.click();
-}
-
-function debounce(func, wait) {
-  let timeout;
-  return function (...args) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
-}
-
-/**********************
- * IMAGE LOADING
- **********************/
-function loadImage(dataUrl) {
-  showSpinner(true);
-  img.src = ''; // Clear previous image
-  img.src = dataUrl;
-  img.onload = () => {
-    console.log('Image loaded successfully:', { width: img.width, height: img.height, src: dataUrl });
-    zoom = 1;
-    panX = 0;
-    panY = 0;
-    canvas.width = Math.min(img.width, window.innerWidth * 0.8);
-    canvas.height = canvas.width * (img.height / img.width);
-    if (canvas.width === 0 || canvas.height === 0) {
-      showModal('Image dimensions are invalid. Please try another image.');
-      console.error('Invalid image dimensions: width=', img.width, 'height=', img.height);
-      showSpinner(false);
-      return;
-    }
-    draw();
-    setAxesBtn.disabled = false;
-    resetAxisPointsBtn.disabled = false;
-    saveState();
-    saveSession();
-    showSpinner(false);
-    document.dispatchEvent(new Event('imageLoaded'));
-  };
-  img.onerror = () => {
-    showModal('Failed to load image. Please try another image or check file integrity.');
-    console.error('Image load failed: src=', dataUrl);
-    showSpinner(false);
-  };
-}
-
-/**********************
- * COORDINATE TRANSFORMATIONS
- **********************/
-function imageToCanvasCoords(clientX, clientY) {
-  const rect = canvas.getBoundingClientRect();
-  const x = (clientX - rect.left - panX) / zoom;
-  const y = (clientY - rect.top - panY) / zoom;
-  return { x, y };
-}
-
-function canvasToDataCoords(x, y) {
-  let dataX, dataY;
-  try {
-    dataX = logX ? Math.pow(10, (x - offsetX) / scaleX) : (x - offsetX) / scaleX;
-    dataY = logY ? Math.pow(10, (y - offsetY) / scaleY) : (y - offsetY) / scaleY;
-    if (isNaN(dataX) || isNaN(dataY) || !isFinite(dataX) || !isFinite(dataY)) {
-      console.warn(`Invalid data coords: x=${x}, y=${y}, dataX=${dataX}, dataY=${dataY}`);
-      return null;
-    }
-    return { dataX, dataY };
-  } catch (e) {
-    console.error('Error converting to data coords:', e);
-    return null;
-  }
-}
-
-/**********************
- * UI UPDATES
- **********************/
-function updateLineSelect() {
-  lineSelect.innerHTML = '';
-  lines.forEach((line, i) => {
-    const option = document.createElement('option');
-    option.value = i;
-    option.textContent = line.name;
-    lineSelect.appendChild(option);
-  });
-  lineSelect.value = currentLineIndex;
-}
-
-function updatePreview() {
-  previewTable.innerHTML = '';
-  if (lines.every(line => line.points.length === 0)) {
-    previewTable.innerHTML = '<tr><td>No data</td></tr>';
-    return;
-  }
-  lines.forEach(line => {
-    if (line.points.length === 0) return;
-    const nameRow = document.createElement('tr');
-    nameRow.innerHTML = `<td colspan="2"><strong>${line.name}</strong></td>`;
-    previewTable.appendChild(nameRow);
-    const headerRow = document.createElement('tr');
-    headerRow.innerHTML = '<td>X</td><td>Y</td>';
-    previewTable.appendChild(headerRow);
-    line.points.forEach(p => {
-      const row = document.createElement('tr');
-      const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(15);
-      const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(15);
-      row.innerHTML = `<td>${dataX}</td><td>${dataY}</td>`;
-      previewTable.appendChild(row);
-    });
-  });
-}
-
-function findNearestPointIndex(x, y) {
-  let minDist = Infinity, closestIndex = -1;
-  lines[currentLineIndex].points.forEach((p, i) => {
-    const dist = Math.hypot(p.x - x, p.y - y);
-    if (dist < minDist && dist < 10 / zoom) {
-      minDist = dist;
-      closestIndex = i;
-    }
-  });
-  return closestIndex;
-}
-
-/**********************
- * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
- **********************/
-function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const f1 = -tension * t3 + 2 * tension * t2 - tension * t;
-  const f2 = (2 - tension) * t3 + (tension - 3) * t2 + 1;
-  const f3 = (tension - 2) * t3 + (3 - 2 * tension) * t2 + tension * t;
-  const f4 = tension * t3 - tension * t2;
-  return {
-    x: f1 * p0.x + f2 * p1.x + f3 * p2.x + f4 * p3.x,
-    y: f1 * p0.y + f2 * p1.y + f3 * p2.y + f4 * p3.y
-  };
-}
-
-function drawCatmullRomPath(ctx, points, segments = 20) {
-  if (points.length < 2) return;
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[Math.max(0, i - 1)];
-    const p1 = points[i];
-    const p2 = points[Math.min(points.length - 1, i + 1)];
-    const p3 = points[Math.min(points.length - 1, i + 2)];
-    for (let j = 0; j <= segments; j++) {
-      const t = j / segments;
-      const point = getCatmullRomPoint(t, p0, p1, p2, p3);
-      ctx.lineTo(point.x, point.y);
-    }
-  }
-  ctx.stroke();
-}
-
-/**********************
- * DRAWING LOOP
- **********************/
-const draw = debounce(() => {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.translate(panX, panY);
-  ctx.scale(zoom, zoom);
-
-  // Draw image only if loaded
-  if (img.src && img.complete && img.naturalWidth > 0) {
-    try {
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    } catch (e) {
-      console.error('Failed to draw image:', e);
-      showModal('Error drawing image on canvas. Please try another image or browser.');
-    }
-  } else {
-    ctx.fillStyle = '#333';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#fff';
-    ctx.font = '16px Arial';
-    ctx.fillText(img.src ? 'Loading image...' : 'No image loaded. Please upload an image.', 10, 20);
-  }
-
-  // Draw grid
-  if (isCalibrated && showGrid) {
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.lineWidth = 1 / zoom;
-    const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
-    const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[2].y - offsetY) / scaleY) : (axisPoints[2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
-    const xStep = (xMax - xMin) / 10;
-    const yStep = (yMax - yMin) / 10;
-    for (let x = xMin; x <= xMax; x += xStep) {
-      const px = logX ? Math.log10(x) * scaleX + offsetX : x * scaleX + offsetX;
-      ctx.beginPath();
-      ctx.moveTo(px, 0);
-      ctx.lineTo(px, canvas.height);
-      ctx.stroke();
-    }
-    for (let y = yMin; y <= yMax; y += yStep) {
-      const py = logY ? Math.log10(y) * scaleY + offsetY : y * scaleY + offsetY;
-      ctx.beginPath();
-      ctx.moveTo(0, py);
-      ctx.lineTo(canvas.width, py);
-      ctx.stroke();
-    }
-  }
-
-  // Draw axis points
-  ctx.fillStyle = 'red';
-  ctx.font = `${12 / zoom}px Arial`;
-  axisPoints.forEach((p, i) => {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 5 / zoom, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.fillText(axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom);
-  });
-
-  // Draw points
-  lines.forEach((line, lineIdx) => {
-    ctx.fillStyle = lineColors[lineIdx % lineColors.length];
-    line.points.forEach((p, i) => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3 / zoom, 0, 2 * Math.PI);
-      if (lineIdx === currentLineIndex && i === selectedPointIndex) {
-        ctx.strokeStyle = 'yellow';
-        ctx.lineWidth = 2 / zoom;
-        ctx.stroke();
-      }
-      ctx.fill();
-    });
-  });
-
-  // Draw highlight path with Catmull-Rom spline
-  if (highlightPath.length > 1) {
-    ctx.strokeStyle = 'yellow';
-    ctx.lineWidth = highlightWidth / zoom;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    drawCatmullRomPath(ctx, highlightPath, 20);
-  }
-
-  ctx.restore();
-}, 16);
-
-// Listen for imageLoaded event to trigger redraw
-document.addEventListener('imageLoaded', () => {
-  console.log('imageLoaded event triggered');
-  draw();
-});
-
-/**********************
- * EVENT HANDLERS
- **********************/
-canvas.addEventListener('mousemove', e => {
-  let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-  let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
-  let dataX = dataCoords ? dataCoords.dataX : x;
-  let dataY = dataCoords ? dataCoords.dataY : y;
-  statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
-
-  // Handle orthogonal axes snapping for axes mode
-  if (mode === 'axes' && orthogonalAxes.checked) {
-    if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
-      y = axisPoints[0].y;
-    } else if (axisPoints.length === 2) { // Snapping Y1 to X1's x-coordinate
-      x = axisPoints[0].x;
-    } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
-      x = axisPoints[2].x;
-    }
-  }
-
-  // Snap to grid for smoother adjustments if grid is enabled and in adjust mode
-  if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
-    const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
-    const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[2].y - offsetY) / scaleY) : (axisPoints[2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
-    const xStep = (xMax - xMin) / 10;
-    const yStep = (yMax - yMin) / 10;
-
-    // Convert canvas coords to data coords for snapping
-    dataCoords = canvasToDataCoords(x, y);
-    if (dataCoords) {
-      let snappedDataX = Math.round(dataCoords.dataX / xStep) * xStep;
-      let snappedDataY = Math.round(dataCoords.dataY / yStep) * yStep;
-      // Convert snapped data coords back to canvas coords
-      x = logX ? Math.log10(snappedDataX) * scaleX + offsetX : snappedDataX * scaleX + offsetX;
-      y = logY ? Math.log10(snappedDataY) * scaleY + offsetY : snappedDataY * scaleY + offsetY;
-      // Update data coords for status bar and point updates
-      dataCoords = { dataX: snappedDataX, dataY: snappedDataY };
-      dataX = snappedDataX;
-      dataY = snappedDataY;
-    }
-  }
-
-  // Update magnifier position and content
-  if (mode === 'axes' || mode === 'highlight' || mode === 'add' || mode === 'adjust' || mode === 'delete') {
-    magnifier.style.display = 'block';
-    let magnifierX = e.clientX + 10;
-    let magnifierY = e.clientY + 10;
-
-    // Center the magnifier on the point being dragged in adjust mode
-    if (isDraggingPoint && mode === 'adjust') {
-      // Calculate the client coordinates that place the dragged point at the magnifier's center (50, 50)
-      const rect = canvas.getBoundingClientRect();
-      magnifierX = x * zoom + rect.left + panX - 50; // Center the point at magnifier's (50, 50)
-      magnifierY = y * zoom + rect.top + panY - 50;
-    } else {
-      // Default offset for other modes
-      magnifierX = e.clientX + 10;
-      magnifierY = e.clientY + 10;
-    }
-
-    // Ensure magnifier stays within window bounds
-    magnifierX = Math.max(0, Math.min(magnifierX, window.innerWidth - magnifier.width));
-    magnifierY = Math.max(0, Math.min(magnifierY, window.innerHeight - magnifier.height));
-
-    magnifier.style.left = `${magnifierX}px`;
-    magnifier.style.top = `${magnifierY}px`;
-
-    // Draw magnifier content
-    magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
-    magCtx.drawImage(
-      canvas,
-      x - 25 / magnifierZoom,
-      y - 25 / magnifierZoom,
-      50 / magnifierZoom,
-      50 / magnifierZoom,
-      0, 0, 100, 100
-    );
-    magCtx.beginPath();
-    magCtx.moveTo(50, 0);
-    magCtx.lineTo(50, 100);
-    magCtx.moveTo(0, 50);
-    magCtx.lineTo(100, 50);
-    magCtx.strokeStyle = 'red';
-    magCtx.stroke();
-  }
-
-  // Handle point dragging in adjust mode
-  if (isDraggingPoint && mode === 'adjust') {
-    if (!dataCoords) return;
-    const { dataX, dataY } = dataCoords;
-    lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY };
-    console.log(`Adjusting point ${selectedPointIndex}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
-    updatePreview();
-    draw();
-  }
-
-  // Handle highlighting
-  if (isHighlighting && mode === 'highlight') {
-    highlightPath.push({ x, y });
-    draw();
-  }
-});
-
-canvas.addEventListener('mouseleave', () => {
-  magnifier.style.display = 'none';
-  statusBar.textContent = `Mode: ${mode}`;
-});
-
-imageUpload.addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) {
-    showModal('No file selected. Please choose an image.');
-    console.error('No file selected for image upload');
-    return;
-  }
-
-  const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
-  if (!validTypes.includes(file.type)) {
-    showModal('Invalid file type. Please upload a PNG, JPEG, GIF, or BMP image.');
-    console.error('Invalid file type:', file.type);
-    return;
-  }
-
-  const reader = new FileReader();
-  reader.onload = ev => {
-    console.log('HTML input image read:', file.name);
-    loadImage(ev.target.result);
-  };
-  reader.onerror = () => {
-    showModal('Error reading file. Please try another image.');
-    console.error('FileReader error for file:', file.name);
-    showSpinner(false);
-  };
-  reader.readAsDataURL(file);
-});
-
-document.getElementById('zoom-in').onclick = () => { zoom *= 1.2; draw(); saveSession(); };
-document.getElementById('zoom-out').onclick = () => { zoom /= 1.2; draw(); saveSession(); };
-document.getElementById('reset-view').onclick = () => { zoom = 1; panX = 0; panY = 0; draw(); saveSession(); };
-document.getElementById('pan-mode').onclick = () => {
-  isPanning = !isPanning;
-  canvas.style.cursor = isPanning ? 'move' : mode === 'highlight' ? 'crosshair' : 'default';
-  saveSession();
-};
-
-canvas.addEventListener('mousedown', e => {
-  if (isPanning && e.buttons === 1) {
-    startPan.x = e.clientX - panX;
-    startPan.y = e.clientY - panY;
-    return;
-  }
-
-  if (e.button === 0 && mode === 'axes' && axisPoints.length < 4) {
-    let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-    if (orthogonalAxes.checked) {
-      if (axisPoints.length === 1) { // Snap X2 to X1's y
-        y = axisPoints[0].y;
-      } else if (axisPoints.length === 2) { // Snap Y1 to X1's x
-        x = axisPoints[0].x;
-      } else if (axisPoints.length === 3) { // Snap Y2 to Y1's x
-        x = axisPoints[2].x;
-      }
-    }
-    axisPoints.push({ x, y });
-    axisInstruction.textContent = axisPoints.length < 4
-      ? `Click point for ${axisLabels[axisPoints.length]} on the chart.`
-      : 'Enter axis values and click Calibrate.';
-    calibrateBtn.disabled = axisPoints.length !== 4;
-    draw();
-    saveState();
-    saveSession();
-  } else if (e.button === 0 && mode === 'add' && isCalibrated) {
-    const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-    let dataCoords = canvasToDataCoords(x, y);
-    if (!dataCoords) {
-      showModal('Invalid point coordinates. Try again.');
-      return;
-    }
-    const { dataX, dataY } = dataCoords;
-    console.log(`Adding point: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
-    lines[currentLineIndex].points.push({ x, y, dataX, dataY });
-    updatePreview();
-    draw();
-    saveState();
-    saveSession();
-  } else if (e.button === 0 && mode === 'delete' && isCalibrated) {
-    const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-    const index = findNearestPointIndex(x, y);
-    if (index !== -1) {
-      lines[currentLineIndex].points.splice(index, 1);
-      updatePreview();
-      draw();
       saveState();
-      saveSession();
-    }
-  } else if (e.button === 0 && mode === 'adjust' && isCalibrated) {
-    const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-    selectedPointIndex = findNearestPointIndex(x, y);
-    if (selectedPointIndex !== -1) {
-      isDraggingPoint = true;
-    }
-  } else if (e.button === 0 && mode === 'highlight' && isCalibrated && !isHighlighting) {
-    const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-    isHighlighting = true;
-    highlightPath = [{ x, y }];
-    draw();
+    };
+    reader.readAsText(file);
   }
 });
 
-canvas.addEventListener('mouseup', e => {
-  if (e.button === 0 && mode === 'adjust' && isDraggingPoint) {
-    isDraggingPoint = false;
-    selectedPointIndex = -1;
-    saveState();
-    saveSession();
-  } else if (e.button === 0 && mode === 'highlight' && isHighlighting) {
-    isHighlighting = false;
-    if (highlightPath.length < 2) {
-      showModal('Highlight path is too short to save.');
-      highlightPath = [];
-      draw();
-      return;
-    }
-    const n = parseInt(nPointsInput.value);
-    if (n <= 0) {
-      showModal('Number of points (n) must be greater than 0');
-      highlightPath = [];
-      draw();
-      return;
-    }
-    let lineName = highlightLineName.value.trim() || `Highlighted Line ${lines.length + 1}`;
-    if (lines.some(line => line.name === lineName)) {
-      let suffix = 1;
-      while (lines.some(line => line.name === `${lineName} (${suffix})`)) {
-        suffix++;
-      }
-      lineName = `${lineName} (${suffix})`;
-    }
-    lines.push({ name: lineName, points: [] });
-    currentLineIndex = lines.length - 1;
-    const spacedPoints = interpolatePoints(highlightPath, n);
-    spacedPoints.forEach(p => {
-      let dataCoords = canvasToDataCoords(p.x, p.y);
-      if (!dataCoords) return;
-      const { dataX, dataY } = dataCoords;
-      console.log(`Adding highlight point: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
-      lines[currentLineIndex].points.push({ x: p.x, y: p.y, dataX, dataY });
+// Export JSON
+exportJsonBtn.addEventListener('click', () => {
+  const state = history[historyIndex];
+  const blob = new Blob([JSON.stringify(state)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'digitizer.json';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// Export CSV
+exportCsvBtn.addEventListener('click', () => {
+  let csv = 'Line,X,Y\n';
+  lines.forEach(line => {
+    line.points.forEach(pt => {
+      csv += `${line.name},${pt.x},${pt.y}\n`;
     });
-    highlightPath = [];
-    updateLineSelect();
-    updatePreview();
-    draw();
-    saveState();
-    saveSession();
-  }
+  });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'data.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 });
 
-document.getElementById('toggle-theme').onclick = () => {
-  document.body.classList.toggle('dark');
-  localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
-};
-
-/**********************
- * KEYBOARD SHORTCUTS
- **********************/
-document.addEventListener('keydown', e => {
-  if (e.ctrlKey && e.key === 'z') { undoBtn.click(); e.preventDefault(); }
-  if (e.ctrlKey && e.key === 'y') { redoBtn.click(); e.preventDefault(); }
-  if (e.key === '+') { zoom *= 1.2; draw(); saveSession(); }
-  if (e.key === '-') { zoom /= 1.2; draw(); saveSession(); }
-  if (e.key === '0') { zoom = 1; panX = 0; panY = 0; draw(); saveSession(); }
-  if (e.key === 'p' && isCalibrated) { addPointBtn.click(); }
-  if (e.key === 'h' && isCalibrated) { highlightLineBtn.click(); }
+// Export XLSX
+exportXlsxBtn.addEventListener('click', () => {
+  const wb = XLSX.utils.book_new();
+  lines.forEach(line => {
+    const ws_data = [['X', 'Y']];
+    line.points.forEach(pt => ws_data.push([pt.x, pt.y]));
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+    XLSX.utils.book_append_sheet(wb, ws, line.name);
+  });
+  XLSX.writeFile(wb, 'data.xlsx');
 });
 
-/**********************
- * CALIBRATION
- **********************/
-setAxesBtn.addEventListener('click', () => {
-  axisPoints = [];
-  mode = 'axes';
-  axisInputs.style.display = 'block';
-  axisInstruction.textContent = `Click point for ${axisLabels[axisPoints.length]} on the chart.`;
-  updateButtonStates();
-  draw();
+// Clear session
+clearSessionBtn.addEventListener('click', () => {
+  localStorage.clear();
+  location.reload();
 });
 
-resetAxisPointsBtn.addEventListener('click', () => {
-  axisPoints = [];
-  mode = 'axes';
-  axisInputs.style.display = 'block';
-  axisInstruction.textContent = `Click point for ${axisLabels[axisPoints.length]} on the chart.`;
-  calibrateBtn.disabled = true;
-  draw();
-  saveState();
-  saveSession();
-});
-
-resetCalibrationBtn.addEventListener('click', () => {
+// Total reset
+totalResetBtn.addEventListener('click', () => {
+  lines = [{ name: 'Line 1', points: [] }];
+  currentLineIndex = 0;
   axisPoints = [];
   isCalibrated = false;
   logX = false;
   logY = false;
-  toggleLogXBtn.classList.remove('log-active');
-  toggleLogYBtn.classList.remove('log-active');
-  axisInputs.style.display = 'none';
+  zoom = 1;
+  panX = 0;
+  panY = 0;
+  showGrid = false;
+  mode = 'none';
+  highlightPath = [];
+  isHighlighting = false;
+  isDraggingPoint = false;
+  magnifierZoom = 2;
+  history = [];
+  historyIndex = -1;
+  updateLineSelect();
+  updatePreview();
+  updateButtonStates();
   axisInstruction.textContent = 'Click "Set Axis Points" then enter values.';
+  axisInputs.style.display = 'none';
+  calibrateBtn.disabled = true;
   addPointBtn.disabled = true;
   adjustPointBtn.disabled = true;
   deletePointBtn.disabled = true;
@@ -735,480 +713,15 @@ resetCalibrationBtn.addEventListener('click', () => {
   renameLineBtn.disabled = true;
   draw();
   saveState();
-  saveSession();
 });
 
-calibrateBtn.addEventListener('click', () => {
-  const x1Val = parseFloat(document.getElementById('x1-value').value);
-  const x2Val = parseFloat(document.getElementById('x2-value').value);
-  const y1Val = parseFloat(document.getElementById('y1-value').value);
-  const y2Val = parseFloat(document.getElementById('y2-value').value);
-
-  if (isNaN(x1Val) || isNaN(x2Val) || isNaN(y1Val) || isNaN(y2Val)) {
-    showModal('Please enter valid axis values');
-    return;
-  }
-  if (x1Val === x2Val || y1Val === y2Val) {
-    showModal('Axis values must be different');
-    return;
-  }
-  if (axisPoints.length !== 4) {
-    showModal('Please set all four axis points (X1, X2, Y1, Y2)');
-    return;
-  }
-  if (Math.abs(axisPoints[1].x - axisPoints[0].x) < 1e-10 || Math.abs(axisPoints[3].y - axisPoints[2].y) < 1e-10) {
-    showModal('Axis points must have distinct x/y coordinates (too close)');
-    return;
-  }
-  if (logX && (x1Val <= 0 || x2Val <= 0)) {
-    showModal('Logarithmic X-axis requires positive values for X1 and X2');
-    return;
-  }
-  if (logY && (y1Val <= 0 || y2Val <= 0)) {
-    showModal('Logarithmic Y-axis requires positive values for Y1 and Y2');
-    return;
-  }
-
-  const x1Pix = axisPoints[0].x, x2Pix = axisPoints[1].x;
-  const y1Pix = axisPoints[2].y, y2Pix = axisPoints[3].y;
-  const deltaPixX = x2Pix - x1Pix;
-  const deltaPixY = y2Pix - y1Pix;
-  const deltaValX = logX ? Math.log10(x2Val) - Math.log10(x1Val) : x2Val - x1Val;
-  const deltaValY = logY ? Math.log10(y2Val) - Math.log10(y1Val) : y2Val - y1Val;
-
-  scaleX = deltaPixX / deltaValX;
-  scaleY = deltaPixY / deltaValY;
-  offsetX = logX ? x1Pix - Math.log10(x1Val) * scaleX : x1Pix - x1Val * scaleX;
-  offsetY = logY ? y1Pix - Math.log10(y1Val) * scaleY : y1Pix - y1Val * scaleY;
-
-  if (!isFinite(scaleX) || !isFinite(scaleY) || Math.abs(deltaPixX) < 1e-10 || Math.abs(deltaPixY) < 1e-10 || Math.abs(deltaValX) < 1e-10 || Math.abs(deltaValY) < 1e-10) {
-    showModal('Calibration failed: Axes too close or invalid values. Adjust points/values.');
-    console.error('Invalid calibration:', { scaleX, scaleY, offsetX, offsetY });
-    return;
-  }
-
-  console.log('Calibration:', {
-    x1Val, x2Val, y1Val, y2Val,
-    x1Pix, x2Pix, y1Pix, y2Pix,
-    scaleX, offsetX, scaleY, offsetY,
-    logX, logY
-  });
-
-  isCalibrated = true;
-  addPointBtn.disabled = false;
-  adjustPointBtn.disabled = false;
-  deletePointBtn.disabled = false;
-  highlightLineBtn.disabled = false;
-  clearPointsBtn.disabled = false;
-  sortPointsBtn.disabled = false;
-  newLineBtn.disabled = false;
-  renameLineBtn.disabled = false;
-  mode = 'add';
-  axisInputs.style.display = 'none';
-  axisInstruction.textContent = 'Calibration complete. Select a mode to digitize.';
-  updateButtonStates();
-  saveState();
-  saveSession();
-  draw();
-  updatePreview();
-
-  lines.forEach(line => {
-    line.points.forEach(p => {
-      let dataCoords = canvasToDataCoords(p.x, p.y);
-      if (dataCoords) {
-        p.dataX = dataCoords.dataX;
-        p.dataY = dataCoords.dataY;
-        console.log(`Recalculated point: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${p.dataX.toFixed(15)}, dataY=${p.dataY.toFixed(15)}`);
-      }
-    });
-  });
-  updatePreview();
-});
-
-toggleGridBtn.addEventListener('click', () => {
-  showGrid = !showGrid;
-  draw();
-  saveState();
-  saveSession();
-});
-
-toggleLogXBtn.addEventListener('click', () => {
-  if (logX && (parseFloat(document.getElementById('x1-value').value) <= 0 || parseFloat(document.getElementById('x2-value').value) <= 0)) {
-    showModal('Logarithmic X-axis requires positive values for X1 and X2');
-    return;
-  }
-  logX = !logX;
-  toggleLogXBtn.classList.toggle('log-active', logX);
-  if (isCalibrated) {
-    const x1Val = parseFloat(document.getElementById('x1-value').value);
-    const x2Val = parseFloat(document.getElementById('x2-value').value);
-    const deltaPixX = axisPoints[1].x - axisPoints[0].x;
-    const deltaValX = logX ? Math.log10(x2Val) - Math.log10(x1Val) : x2Val - x1Val;
-    scaleX = deltaPixX / deltaValX;
-    offsetX = logX ? axisPoints[0].x - Math.log10(x1Val) * scaleX : axisPoints[0].x - x1Val * scaleX;
-    if (!isFinite(scaleX) || Math.abs(deltaPixX) < 1e-10 || Math.abs(deltaValX) < 1e-10) {
-      showModal('Invalid X-axis scale after toggling log mode.');
-      console.error('Invalid scaleX:', scaleX);
-      logX = !logX;
-      toggleLogXBtn.classList.toggle('log-active', logX);
-      return;
-    }
-    lines.forEach(line => {
-      line.points.forEach(p => {
-        let dataCoords = canvasToDataCoords(p.x, p.y);
-        if (dataCoords) {
-          p.dataX = dataCoords.dataX;
-          console.log(`Updated X: x=${p.x.toFixed(2)}, dataX=${p.dataX.toFixed(15)}`);
-        }
-      });
-    });
-    updatePreview();
-    draw();
-    saveState();
-    saveSession();
-  }
-});
-
-toggleLogYBtn.addEventListener('click', () => {
-  if (logY && (parseFloat(document.getElementById('y1-value').value) <= 0 || parseFloat(document.getElementById('y2-value').value) <= 0)) {
-    showModal('Logarithmic Y-axis requires positive values for Y1 and Y2');
-    return;
-  }
-  logY = !logY;
-  toggleLogYBtn.classList.toggle('log-active', logY);
-  if (isCalibrated) {
-    const y1Val = parseFloat(document.getElementById('y1-value').value);
-    const y2Val = parseFloat(document.getElementById('y2-value').value);
-    const deltaPixY = axisPoints[3].y - axisPoints[2].y;
-    const deltaValY = logY ? Math.log10(y2Val) - Math.log10(y1Val) : y2Val - y1Val;
-    scaleY = deltaPixY / deltaValY;
-    offsetY = logY ? axisPoints[2].y - Math.log10(y1Val) * scaleY : axisPoints[2].y - y1Val * scaleY;
-    if (!isFinite(scaleY) || Math.abs(deltaPixY) < 1e-10 || Math.abs(deltaValY) < 1e-10) {
-      showModal('Invalid Y-axis scale after toggling log mode.');
-      console.error('Invalid scaleY:', scaleY);
-      logY = !logY;
-      toggleLogYBtn.classList.toggle('log-active', logY);
-      return;
-    }
-    lines.forEach(line => {
-      line.points.forEach(p => {
-        let dataCoords = canvasToDataCoords(p.x, p.y);
-        if (dataCoords) {
-          p.dataY = dataCoords.dataY;
-          console.log(`Updated Y: y=${p.y.toFixed(2)}, dataY=${p.dataY.toFixed(15)}`);
-        }
-      });
-    });
-    updatePreview();
-    draw();
-    saveState();
-    saveSession();
-  }
-});
-
-/**********************
- * TOTAL RESET
- **********************/
-totalResetBtn.addEventListener('click', () => {
-  showModal('Are you sure you want to reset all calibration and data?', false, () => {
-    axisPoints = [];
-    isCalibrated = false;
-    scaleX = undefined;
-    scaleY = undefined;
-    offsetX = undefined;
-    offsetY = undefined;
-    logX = false;
-    logY = false;
-    lines = [{ name: 'Line 1', points: [] }];
-    currentLineIndex = 0;
-    highlightPath = [];
-    isHighlighting = false;
-    mode = 'none';
-    history = [];
-    historyIndex = -1;
-    showGrid = false;
-    magnifierZoom = 2;
-    toggleLogXBtn.classList.remove('log-active');
-    toggleLogYBtn.classList.remove('log-active');
-    axisInputs.style.display = 'none';
-    axisInstruction.textContent = 'Click "Set Axis Points" then enter values.';
-    addPointBtn.disabled = true;
-    adjustPointBtn.disabled = true;
-    deletePointBtn.disabled = true;
-    highlightLineBtn.disabled = true;
-    clearPointsBtn.disabled = true;
-    sortPointsBtn.disabled = true;
-    newLineBtn.disabled = true;
-    renameLineBtn.disabled = true;
-    undoBtn.disabled = true;
-    redoBtn.disabled = true;
-    highlightControls.style.display = 'none';
-    updateLineSelect();
-    updatePreview();
-    updateButtonStates();
-    localStorage.removeItem('digitizerState');
-    draw();
-    showModal('All calibration and data have been reset.');
-  });
-});
-
-/**********************
- * POINT ACTIONS
- **********************/
-addPointBtn.addEventListener('click', () => { mode = 'add'; updateButtonStates(); });
-adjustPointBtn.addEventListener('click', () => { mode = 'adjust'; updateButtonStates(); });
-deletePointBtn.addEventListener('click', () => { mode = 'delete'; updateButtonStates(); });
-highlightLineBtn.addEventListener('click', () => {
-  mode = 'highlight';
-  highlightControls.style.display = 'block';
-  updateButtonStates();
-});
-deleteHighlightBtn.addEventListener('click', () => {
-  highlightPath = [];
-  draw();
-  saveState();
-  saveSession();
-});
-
-clearPointsBtn.addEventListener('click', () => {
-  lines[currentLineIndex].points = [];
-  updatePreview();
-  draw();
-  saveState();
-  saveSession();
-});
-
-sortPointsBtn.addEventListener('click', () => {
-  lines[currentLineIndex].points.sort((a, b) => a.dataX - b.dataX);
-  updatePreview();
-  draw();
-  saveState();
-  saveSession();
-});
-
-function updateButtonStates() {
-  addPointBtn.classList.toggle('active', mode === 'add');
-  adjustPointBtn.classList.toggle('active', mode === 'adjust');
-  deletePointBtn.classList.toggle('active', mode === 'delete');
-  highlightLineBtn.classList.toggle('active', mode === 'highlight');
-  canvas.style.cursor = isPanning ? 'move' : (mode === 'highlight' || mode === 'axes') ? 'crosshair' : 'default';
-  statusBar.textContent = `Mode: ${mode}`;
-}
-
-/**********************
- * POINT PROCESSING
- **********************/
-function interpolatePoints(path, n) {
-  if (path.length < 2) return path;
-  const result = [];
-  const totalLength = path.reduce((sum, p, i) => {
-    if (i === 0) return 0;
-    const dx = p.x - path[i-1].x;
-    const dy = p.y - path[i-1].y;
-    return sum + Math.sqrt(dx*dx + dy*dy);
-  }, 0);
-  if (totalLength === 0) return [path[0]];
-
-  const segmentLength = totalLength / (n - 1);
-  let accumulatedLength = 0;
-  result.push(path[0]);
-
-  for (let i = 1; i < path.length; i++) {
-    const dx = path[i].x - path[i-1].x;
-    const dy = path[i].y - path[i-1].y;
-    const segment = Math.sqrt(dx*dx + dy*dy);
-    accumulatedLength += segment;
-
-    while (result.length < n && accumulatedLength >= segmentLength * result.length) {
-      const t = (segmentLength * result.length - (accumulatedLength - segment)) / segment;
-      result.push({
-        x: path[i-1].x + t * dx,
-        y: path[i-1].y + t * dy
-      });
-    }
-  }
-  return result.slice(0, n);
-}
-
-/**********************
- * LINE MANAGEMENT
- **********************/
-newLineBtn.addEventListener('click', () => {
-  showModal('Enter new line name:', true, name => {
-    if (!name) {
-      showModal('Line name cannot be empty');
-      return;
-    }
-    if (lines.some(line => line.name === name)) {
-      showModal('Line name must be unique');
-      return;
-    }
-    lines.push({ name, points: [] });
-    currentLineIndex = lines.length - 1;
-    updateLineSelect();
-    updatePreview();
-    draw();
-    saveState();
-    saveSession();
-  });
-});
-
-renameLineBtn.addEventListener('click', () => {
-  showModal('Enter new name:', true, name => {
-    if (!name) {
-      showModal('Line name cannot be empty');
-      return;
-    }
-    if (lines.some((line, i) => i !== currentLineIndex && line.name === name)) {
-      showModal('Line name must be unique');
-      return;
-    }
-    lines[currentLineIndex].name = name;
-    updateLineSelect();
-    updatePreview();
-    saveState();
-    saveSession();
-  });
-});
-
-lineSelect.addEventListener('change', () => {
-  currentLineIndex = parseInt(lineSelect.value);
-  updatePreview();
-  draw();
-  saveSession();
-});
-
-/**********************
- * DATA IMPORT/EXPORT
- **********************/
-importJsonBtn.addEventListener('click', () => {
-  importJsonInput.click();
-});
-
-importJsonInput.addEventListener('change', e => {
-  showSpinner(true);
-  const file = e.target.files[0];
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        const state = JSON.parse(ev.target.result);
-        lines = state.lines || [{ name: 'Line 1', points: [] }];
-        axisPoints = state.axisPoints || [];
-        scaleX = state.scaleX;
-        scaleY = state.scaleY;
-        offsetX = state.offsetX;
-        offsetY = state.offsetY;
-        logX = state.logX || false;
-        logY = state.logY || false;
-        isCalibrated = state.isCalibrated || false;
-        zoom = state.zoom || 1;
-        panX = state.panX || 0;
-        panY = state.panY || 0;
-        showGrid = state.showGrid || false;
-        mode = state.mode || 'none';
-        currentLineIndex = state.currentLineIndex || 0;
-        magnifierZoom = state.magnifierZoom || 2;
-        history = [];
-        historyIndex = -1;
-        updateLineSelect();
-        updatePreview();
-        updateButtonStates();
-        toggleLogXBtn.classList.toggle('log-active', logX);
-        toggleLogYBtn.classList.toggle('log-active', logY);
-        document.getElementById('magnifier-zoom').value = magnifierZoom;
-        if (isCalibrated) {
-          addPointBtn.disabled = false;
-          adjustPointBtn.disabled = false;
-          deletePointBtn.disabled = false;
-          highlightLineBtn.disabled = false;
-          clearPointsBtn.disabled = false;
-          sortPointsBtn.disabled = false;
-          newLineBtn.disabled = false;
-          renameLineBtn.disabled = false;
-        }
-        draw();
-        saveState();
-        saveSession();
-        showSpinner(false);
-        showModal('JSON data imported successfully.');
-      } catch (e) {
-        showModal('Invalid JSON file. Please try again.');
-        console.error('JSON import error:', e);
-        showSpinner(false);
-      }
-    };
-    reader.readAsText(file);
-  } else {
-    showModal('No file selected.');
-    showSpinner(false);
-  }
-});
-
-exportJsonBtn.addEventListener('click', () => {
-  download('graph.json', JSON.stringify({ lines, axisPoints, scaleX, scaleY, offsetX, offsetY, logX, logY, isCalibrated, zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom }), 'application/json');
-});
-
-exportCsvBtn.addEventListener('click', () => {
-  let csv = '';
-  lines.forEach(line => {
-    csv += `"${line.name}",\n`;
-    csv += 'X,Y\n';
-    line.points.forEach(p => {
-      const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(15);
-      const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(15);
-      csv += `${dataX},${dataY}\n`;
-    });
-    csv += '\n';
-  });
-  download('graph.csv', csv, 'text/csv');
-});
-
-exportXlsxBtn.addEventListener('click', () => {
-  try {
-    const workbook = XLSX.utils.book_new();
-    lines.forEach(line => {
-      if (line.points.length === 0) return; // Skip empty lines
-      const sortedPoints = [...line.points].sort((a, b) => a.dataX - b.dataX);
-      const data = sortedPoints.map(p => {
-        const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15));
-        const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15));
-        return [dataX, dataY];
-      });
-      data.unshift(['X', 'Y']); // Header
-      const worksheet = XLSX.utils.aoa_to_sheet(data);
-      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_'); // Sanitize sheet name
-      XLSX.utils.book_append_sheet(workbook, worksheet, safeName);
-    });
-    if (workbook.SheetNames.length === 0) {
-      showModal('No data to export.');
-      return;
-    }
-    XLSX.writeFile(workbook, 'graph.xlsx');
-  } catch (e) {
-    showModal('Failed to export XLSX. Please try again.');
-    console.error('XLSX export error:', e);
-  }
-});
-
-/**********************
- * MAGNIFIER ZOOM
- **********************/
-document.getElementById('magnifier-zoom').addEventListener('input', (e) => {
-  magnifierZoom = parseFloat(e.target.value);
-  saveSession();
-  draw();
-});
-
-/**********************
- * HISTORY
- **********************/
+// Undo
 undoBtn.addEventListener('click', () => {
   if (historyIndex > 0) {
     historyIndex--;
     const state = history[historyIndex];
-    lines = JSON.parse(JSON.stringify(state.lines));
-    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
+    lines = state.lines;
+    axisPoints = state.axisPoints;
     scaleX = state.scaleX;
     scaleY = state.scaleY;
     offsetX = state.offsetX;
@@ -1223,12 +736,15 @@ undoBtn.addEventListener('click', () => {
     mode = state.mode;
     currentLineIndex = state.currentLineIndex;
     magnifierZoom = state.magnifierZoom;
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
     toggleLogXBtn.classList.toggle('log-active', logX);
     toggleLogYBtn.classList.toggle('log-active', logY);
-    document.getElementById('magnifier-zoom').value = magnifierZoom;
     updateLineSelect();
     updatePreview();
     updateButtonStates();
+    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
+    calibrateBtn.disabled = axisPoints.length !== 4;
     if (isCalibrated) {
       addPointBtn.disabled = false;
       adjustPointBtn.disabled = false;
@@ -1238,32 +754,20 @@ undoBtn.addEventListener('click', () => {
       sortPointsBtn.disabled = false;
       newLineBtn.disabled = false;
       renameLineBtn.disabled = false;
-    } else {
-      addPointBtn.disabled = true;
-      adjustPointBtn.disabled = true;
-      deletePointBtn.disabled = true;
-      highlightLineBtn.disabled = true;
-      clearPointsBtn.disabled = true;
-      sortPointsBtn.disabled = true;
-      newLineBtn.disabled = true;
-      renameLineBtn.disabled = true;
     }
-    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
-    calibrateBtn.disabled = axisPoints.length !== 4;
     draw();
-    saveSession();
+    undoBtn.disabled = historyIndex <= 0;
+    redoBtn.disabled = false;
   }
-  undoBtn.disabled = historyIndex <= 0;
-  redoBtn.disabled = historyIndex >= history.length - 1;
 });
 
+// Redo
 redoBtn.addEventListener('click', () => {
   if (historyIndex < history.length - 1) {
     historyIndex++;
     const state = history[historyIndex];
-    lines = JSON.parse(JSON.stringify(state.lines));
-    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
+    lines = state.lines;
+    axisPoints = state.axisPoints;
     scaleX = state.scaleX;
     scaleY = state.scaleY;
     offsetX = state.offsetX;
@@ -1278,12 +782,15 @@ redoBtn.addEventListener('click', () => {
     mode = state.mode;
     currentLineIndex = state.currentLineIndex;
     magnifierZoom = state.magnifierZoom;
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
     toggleLogXBtn.classList.toggle('log-active', logX);
     toggleLogYBtn.classList.toggle('log-active', logY);
-    document.getElementById('magnifier-zoom').value = magnifierZoom;
     updateLineSelect();
     updatePreview();
     updateButtonStates();
+    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
+    calibrateBtn.disabled = axisPoints.length !== 4;
     if (isCalibrated) {
       addPointBtn.disabled = false;
       adjustPointBtn.disabled = false;
@@ -1293,46 +800,164 @@ redoBtn.addEventListener('click', () => {
       sortPointsBtn.disabled = false;
       newLineBtn.disabled = false;
       renameLineBtn.disabled = false;
-    } else {
-      addPointBtn.disabled = true;
-      adjustPointBtn.disabled = true;
-      deletePointBtn.disabled = true;
-      highlightLineBtn.disabled = true;
-      clearPointsBtn.disabled = true;
-      sortPointsBtn.disabled = true;
-      newLineBtn.disabled = true;
-      renameLineBtn.disabled = true;
     }
-    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < 4 ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
+    draw();
+    redoBtn.disabled = historyIndex >= history.length - 1;
+    undoBtn.disabled = false;
+  }
+});
+
+// Canvas events
+canvas.addEventListener('mousedown', e => {
+  const coords = getCanvasCoords(e);
+  if (isPanning) {
+    startPan = { x: e.clientX - panX, y: e.clientY - panY };
+    return;
+  }
+  if (mode === 'axes' && axisPoints.length < 4) {
+    axisPoints.push(coords);
+    axisInstruction.textContent = `Click point for ${axisLabels[axisPoints.length]} on the chart.`;
+    axisInputs.style.display = axisPoints.length === 4 ? 'block' : 'none';
     calibrateBtn.disabled = axisPoints.length !== 4;
     draw();
-    saveSession();
-  }
-  undoBtn.disabled = historyIndex <= 0;
-  redoBtn.disabled = historyIndex >= history.length - 1;
-});
-
-/**********************
- * INITIALIZATION
- **********************/
-window.addEventListener('resize', () => {
-  if (img.src && img.complete && img.naturalWidth > 0) {
-    canvas.width = Math.min(img.width, window.innerWidth * 0.8);
-    canvas.height = canvas.width * (img.height / img.width);
+    saveState();
+  } else if (mode === 'add' && isCalibrated) {
+    lines[currentLineIndex].points.push({ px: coords.x, py: coords.y, x: toRealX(coords.x), y: toRealY(coords.y) });
+    updatePreview();
+    draw();
+    saveState();
+  } else if (mode === 'adjust' && isCalibrated) {
+    const line = lines[currentLineIndex];
+    selectedPointIndex = line.points.findIndex(pt => Math.hypot(pt.px - coords.x, pt.py - coords.y) < 5 / zoom);
+    if (selectedPointIndex !== -1) {
+      isDraggingPoint = true;
+    }
+  } else if (mode === 'delete' && isCalibrated) {
+    const line = lines[currentLineIndex];
+    const index = line.points.findIndex(pt => Math.hypot(pt.px - coords.x, pt.py - coords.y) < 5 / zoom);
+    if (index !== -1) {
+      line.points.splice(index, 1);
+      updatePreview();
+      draw();
+      saveState();
+    }
+  } else if (mode === 'highlight' && isCalibrated) {
+    isHighlighting = true;
+    highlightPath = [coords];
     draw();
   }
 });
 
-if (localStorage.getItem('theme') === 'dark') {
-  document.body.classList.add('dark');
-}
+canvas.addEventListener('mousemove', e => {
+  const coords = getCanvasCoords(e);
+  statusBar.textContent = `X: ${toRealX(coords.x).toFixed(2)}, Y: ${toRealY(coords.y).toFixed(2)}`;
+  if (isPanning && e.buttons === 1) {
+    panX = e.clientX - startPan.x;
+    panY = e.clientY - startPan.y;
+    draw();
+  } else if (isDraggingPoint && e.buttons === 1) {
+    const line = lines[currentLineIndex];
+    line.points[selectedPointIndex] = { px: coords.x, py: coords.y, x: toRealX(coords.x), y: toRealY(coords.y) };
+    updatePreview();
+    draw();
+  } else if (isHighlighting && e.buttons === 1) {
+    highlightPath.push(coords);
+    draw();
+  }
+  // Magnifier
+  magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
+  const magX = e.clientX - magnifier.width / 2;
+  const magY = e.clientY - magnifier.height / 2;
+  magnifier.style.left = `${magX}px`;
+  magnifier.style.top = `${magY}px`;
+  magnifier.style.display = 'block';
+  const magZoom = magnifierZoom * zoom;
+  magCtx.drawImage(img,
+    (coords.x - magnifier.width / (2 * magZoom)) * zoom + panX,
+    (coords.y - magnifier.height / (2 * magZoom)) * zoom + panY,
+    magnifier.width / magZoom, magnifier.height / magZoom,
+    0, 0, magnifier.width, magnifier.height);
+});
 
-loadSession();
-draw();
+canvas.addEventListener('mouseup', e => {
+  if (isPanning) {
+    isPanning = false;
+    saveState();
+  } else if (isDraggingPoint) {
+    isDraggingPoint = false;
+    selectedPointIndex = -1;
+    saveState();
+  } else if (isHighlighting) {
+    isHighlighting = false;
+    if (highlightPath.length > 1) {
+      const lineName = highlightLineName.value || `Line ${lines.length + 1}`;
+      if (!lines.some(l => l.name === lineName)) {
+        const newPoints = [];
+        for (let i = 0; i < highlightPath.length - 1; i++) {
+          const start = highlightPath[i];
+          const end = highlightPath[i + 1];
+          const dx = (end.x - start.x) / (parseInt(nPointsInput.value) - 1);
+          const dy = (end.y - start.y) / (parseInt(nPointsInput.value) - 1);
+          for (let j = 0; j < parseInt(nPointsInput.value); j++) {
+            newPoints.push({
+              px: start.x + dx * j,
+              py: start.y + dy * j,
+              x: toRealX(start.x + dx * j),
+              y: toRealY(start.y + dy * j)
+            });
+          }
+        }
+        lines.push({ name: lineName, points: newPoints });
+        currentLineIndex = lines.length - 1;
+        updateLineSelect();
+        updatePreview();
+      }
+    }
+    highlightPath = [];
+    draw();
+    saveState();
+  }
+});
 
+canvas.addEventListener('mouseleave', () => {
+  magnifier.style.display = 'none';
+  statusBar.textContent = '';
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'p' && isCalibrated) {
+    mode = mode === 'add' ? 'none' : 'add';
+    updateButtonStates();
+  } else if (e.key === 'h' && isCalibrated) {
+    mode = mode === 'highlight' ? 'none' : 'highlight';
+    highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
+    updateButtonStates();
+  } else if (e.ctrlKey && e.key === 'z') {
+    undoBtn.click();
+  } else if (e.ctrlKey && e.key === 'y') {
+    redoBtn.click();
+  }
+});
+
+// Load image from base64
+document.addEventListener('DOMContentLoaded', () => {
+  if (base64Image) {
+    img.src = `data:image/png;base64,${base64Image}`;
+    img.onload = () => {
+      canvas.width = Math.min(img.width, window.innerWidth * 0.8);
+      canvas.height = canvas.width * (img.height / img.width);
+      draw();
+    };
+  }
+  loadSession();
+  // Apply saved theme
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme === 'dark') document.body.classList.add('dark');
+});
+
+// Highlight width slider
 const highlightWidthSlider = document.getElementById('highlight-width');
-highlightWidthSlider.addEventListener('input', (e) => {
+highlightWidthSlider.addEventListener('input', e => {
   highlightWidth = parseInt(e.target.value);
   draw();
 });
