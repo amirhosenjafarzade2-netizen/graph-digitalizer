@@ -3,7 +3,13 @@ from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 import base64
 import io
 import numpy as np
-import cv2  # Requires pip install opencv-python
+
+# Optional OpenCV import with fallback
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+    st.warning("OpenCV not found. Auto Rotation and Grid Detection will be disabled.")
 
 st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 
@@ -71,7 +77,7 @@ if st.session_state.step == 1:
     if uploaded:
         st.session_state.uploaded_image = Image.open(uploaded)
         st.session_state.processed_image = st.session_state.uploaded_image.copy()
-        st.image(st.session_state.processed_image, caption="Uploaded Image", use_column_width=True)
+        st.image(st.session_state.processed_image, caption="Uploaded Image", use_container_width=True)
         if st.button("Next Step", type="primary"):
             st.session_state.step = 2
             st.rerun()
@@ -81,7 +87,7 @@ elif st.session_state.step == 2:
     left_col, right_col = st.columns([2, 1])
     with left_col:
         if st.session_state.processed_image:
-            st.image(st.session_state.processed_image, caption="Processed Image", use_column_width=True)
+            st.image(st.session_state.processed_image, caption="Processed Image", use_container_width=True)
         else:
             st.warning("No image processed yet.")
     with right_col:
@@ -92,27 +98,21 @@ elif st.session_state.step == 2:
         st.subheader("Advanced Processing")
         st.session_state.noise_reduction = st.checkbox("Noise Reduction")
         st.session_state.edge_enhancement = st.checkbox("Edge Enhancement")
-        st.session_state.auto_rotation = st.checkbox("Auto Rotation")
-        st.session_state.grid_detection = st.checkbox("Grid Detection")
+        st.session_state.auto_rotation = st.checkbox("Auto Rotation") if cv2 else False
+        st.session_state.grid_detection = st.checkbox("Grid Detection") if cv2 else False
 
     if st.button("Apply Changes", type="primary"):
         img = st.session_state.uploaded_image.copy()
-        # Apply rotation
         img = img.rotate(st.session_state.rotation, expand=True)
-        # Contrast
         enhancer = ImageEnhance.Contrast(img)
         img = enhancer.enhance(st.session_state.contrast)
-        # Brightness
         enhancer = ImageEnhance.Brightness(img)
         img = enhancer.enhance(st.session_state.brightness)
-        # Noise reduction
         if st.session_state.noise_reduction:
             img = img.filter(ImageFilter.MEDIAN_FILTER)
-        # Edge enhancement
         if st.session_state.edge_enhancement:
             img = img.filter(ImageFilter.EDGE_ENHANCE_MORE)
-        # Auto rotation
-        if st.session_state.auto_rotation:
+        if st.session_state.auto_rotation and cv2:
             try:
                 gray = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2GRAY)
                 blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -129,9 +129,8 @@ elif st.session_state.step == 2:
                 rotated = cv2.warpAffine(np.array(img), M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
                 img = Image.fromarray(cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB))
             except Exception as e:
-                st.warning(f"Auto rotation failed: {e}. Ensure OpenCV is installed.")
-        # Grid detection: Placeholder (simple grid removal if implemented)
-        if st.session_state.grid_detection:
+                st.warning(f"Auto rotation failed: {e}")
+        if st.session_state.grid_detection and cv2:
             try:
                 gray = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2GRAY)
                 edges = cv2.Canny(gray, 50, 150)
