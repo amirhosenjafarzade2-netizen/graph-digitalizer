@@ -36,6 +36,14 @@ if 'auto_rotation' not in st.session_state:
     st.session_state.auto_rotation = False
 if 'grid_detection' not in st.session_state:
     st.session_state.grid_detection = False
+if 'crop_left' not in st.session_state:
+    st.session_state.crop_left = 0
+if 'crop_top' not in st.session_state:
+    st.session_state.crop_top = 0
+if 'crop_right' not in st.session_state:
+    st.session_state.crop_right = 0
+if 'crop_bottom' not in st.session_state:
+    st.session_state.crop_bottom = 0
 
 # Load CSS and JS from files
 try:
@@ -100,6 +108,12 @@ elif st.session_state.step == 2:
         st.session_state.edge_enhancement = st.checkbox("Edge Enhancement")
         st.session_state.auto_rotation = st.checkbox("Auto Rotation") if cv2 else False
         st.session_state.grid_detection = st.checkbox("Grid Detection") if cv2 else False
+        st.subheader("Cropping")
+        width, height = st.session_state.processed_image.size if st.session_state.processed_image else (100, 100)
+        st.session_state.crop_left = st.slider("Crop Left", 0, width, st.session_state.crop_left, step=1)
+        st.session_state.crop_top = st.slider("Crop Top", 0, height, st.session_state.crop_top, step=1)
+        st.session_state.crop_right = st.slider("Crop Right", 0, width, st.session_state.crop_right, step=1)
+        st.session_state.crop_bottom = st.slider("Crop Bottom", 0, height, st.session_state.crop_bottom, step=1)
 
     if st.button("Apply Changes", type="primary"):
         img = st.session_state.uploaded_image.copy()
@@ -137,6 +151,9 @@ elif st.session_state.step == 2:
                 img = Image.fromarray(cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB))
             except Exception as e:
                 st.warning(f"Grid detection failed: {e}")
+        # Apply cropping
+        crop_box = (st.session_state.crop_left, st.session_state.crop_top, st.session_state.crop_right, st.session_state.crop_bottom)
+        img = img.crop(crop_box)
         st.session_state.processed_image = img
         st.rerun()
 
@@ -149,11 +166,19 @@ elif st.session_state.step == 2:
         st.session_state.edge_enhancement = False
         st.session_state.auto_rotation = False
         st.session_state.grid_detection = False
+        st.session_state.crop_left = 0
+        st.session_state.crop_top = 0
+        st.session_state.crop_right = 0
+        st.session_state.crop_bottom = 0
         st.rerun()
 
     if st.button("Auto Optimize"):
         img = st.session_state.uploaded_image.copy()
-        img = ImageOps.autocontrast(img)
+        img = img.convert('RGB')  # Ensure RGB mode for autocontrast
+        try:
+            img = ImageOps.autocontrast(img)
+        except OSError as e:
+            st.warning(f"Auto Optimize failed: {e}. Using original image.")
         st.session_state.processed_image = img
         st.rerun()
 
