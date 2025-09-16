@@ -2,6 +2,8 @@ import streamlit as st
 from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 import base64
 import io
+import numpy as np
+import cv2  # Requires pip install opencv-python
 
 st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 
@@ -13,11 +15,11 @@ if 'uploaded_image' not in st.session_state:
 if 'processed_image' not in st.session_state:
     st.session_state.processed_image = None
 if 'mode' not in st.session_state:
-    st.session_state.mode = 'Manual'  # 'Manual' or 'Automatic'
+    st.session_state.mode = 'Manual'
 if 'contrast' not in st.session_state:
-    st.session_state.contrast = 100
+    st.session_state.contrast = 1.0
 if 'brightness' not in st.session_state:
-    st.session_state.brightness = 100
+    st.session_state.brightness = 1.0
 if 'rotation' not in st.session_state:
     st.session_state.rotation = 0
 if 'noise_reduction' not in st.session_state:
@@ -44,35 +46,49 @@ steps = ["Upload Image", "Preprocessing", "Calibration", "Extract Data", "Export
 col_steps = st.columns(len(steps))
 for i, step_name in enumerate(steps):
     with col_steps[i]:
-        if st.session_state.step == i + 1:
-            st.button(step_name, type="primary", disabled=True)
-        elif st.session_state.step > i + 1:
-            st.button(step_name, on_click=lambda idx=i+1: st.session_state.update(step=idx))
+        label = step_name
+        btn_type = "secondary"
+        disabled = False
+        if st.session_state.step > i + 1:
+            label = f"✔ {step_name}"
+            btn_type = "secondary"
+        elif st.session_state.step == i + 1:
+            btn_type = "primary"
+            disabled = True
         else:
-            st.button(step_name, disabled=True)
+            disabled = True
+        if st.session_state.step > i + 1:
+            if st.button(label, key=f"step_back_{i}", on_click=lambda idx=i+1: st.session_state.update(step=idx)):
+                st.rerun()
+        else:
+            st.button(label, key=f"step_{i}", type=btn_type, disabled=disabled)
 
 # Main content based on step
 if st.session_state.step == 1:
     st.header("Upload Your Graph")
-    st.write("Drag and drop your graph image or click to browse. Supports JPG, PNG, PDF formats.")
-    uploaded = st.file_uploader("Choose a graph image", type=["jpg", "jpeg", "png"])  # Add PDF support if needed
+    st.write("Drag and drop your graph image or click to browse. Supports JPG, PNG formats.")
+    uploaded = st.file_uploader("Choose a graph image", type=["jpg", "jpeg", "png"])
     if uploaded:
-        st.session_state.uploaded_image = uploaded.read()
-        st.session_state.processed_image = st.session_state.uploaded_image
-        st.image(st.session_state.uploaded_image, caption="Uploaded Image")
+        st.session_state.uploaded_image = Image.open(uploaded)
+        st.session_state.processed_image = st.session_state.uploaded_image.copy()
+        st.image(st.session_state.processed_image, caption="Uploaded Image", use_column_width=True)
         if st.button("Next Step", type="primary"):
             st.session_state.step = 2
+            st.rerun()
 
 elif st.session_state.step == 2:
     st.header("Image Preprocessing")
     left_col, right_col = st.columns([2, 1])
     with left_col:
-        st.image(st.session_state.processed_image, caption="Processed Image")
+        if st.session_state.processed_image:
+            st.image(st.session_state.processed_image, caption="Processed Image", use_column_width=True)
+        else:
+            st.warning("No image processed yet.")
     with right_col:
         st.subheader("Basic Adjustments")
-        st.session_state.contrast = st.slider("Contrast", 0, 200, st.session_state.contrast)
-        st.session_state.brightness = st.slider("Brightness", 0, 200, st.session_state.brightness)
-        st.session_state.rotation = st.slider("Rotation", -180, 180, st.session_state.rotation, format="%d°")
+        st.session_state.contrast = st.slider("Contrast", 0.0, 2.0, st.session_state.contrast, step=0.1)
+        st.session_state.brightness = st.slider("Brightness", 0.0, 2.0, st.session_state.brightness, step=0.1)
+        st.session_state.rotation = st.slider("Rotation", -180, 180, st.session_state.rotation, step=1, format="%d°")
         st.subheader("Advanced Processing")
         st.session_state.noise_reduction = st.checkbox("Noise Reduction")
         st.session_state.edge_enhancement = st.checkbox("Edge Enhancement")
@@ -80,32 +96,55 @@ elif st.session_state.step == 2:
         st.session_state.grid_detection = st.checkbox("Grid Detection")
 
     if st.button("Apply Changes", type="primary"):
-        img = Image.open(io.BytesIO(st.session_state.uploaded_image))
+        img = st.session_state.uploaded_image.copy()
         # Apply rotation
-        img = img.rotate(st.session_state.rotation)
+        img = img.rotate(st.session_state.rotation, expand=True)
         # Contrast
         enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(st.session_state.contrast / 100.0)
+        img = enhancer.enhance(st.session_state.contrast)
         # Brightness
         enhancer = ImageEnhance.Brightness(img)
-        img = enhancer.enhance(st.session_state.brightness / 100.0)
+        img = enhancer.enhance(st.session_state.brightness)
         # Noise reduction
         if st.session_state.noise_reduction:
-            img = img.filter(ImageFilter.MEDIAN)
+            img = img.filter(ImageFilter.MEDIAN_FILTER)
         # Edge enhancement
         if st.session_state.edge_enhancement:
-            img = img.filter(ImageFilter.EDGE_ENHANCE)
-        # Auto rotation: Placeholder, could use OpenCV for skew detection if installed
-        # Grid detection: Placeholder
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-        st.session_state.processed_image = buffer.getvalue()
+            img = img.filter(ImageFilter.EDGE_ENHANCE_MORE)
+        # Auto rotation
+        if st.session_state.auto_rotation:
+            try:
+                gray = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2GRAY)
+                blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+                edged = cv2.Canny(blurred, 75, 200)
+                coords = np.column_stack(np.where(edged > 0))
+                angle = cv2.minAreaRect(coords)[-1]
+                if angle < -45:
+                    angle = -(90 + angle)
+                else:
+                    angle = -angle
+                (h, w) = gray.shape[:2]
+                center = (w // 2, h // 2)
+                M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                rotated = cv2.warpAffine(np.array(img), M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+                img = Image.fromarray(cv2.cvtColor(rotated, cv2.COLOR_BGR2RGB))
+            except Exception as e:
+                st.warning(f"Auto rotation failed: {e}. Ensure OpenCV is installed.")
+        # Grid detection: Placeholder (simple grid removal if implemented)
+        if st.session_state.grid_detection:
+            try:
+                gray = cv2.cvtColor(np.array(img.convert('RGB')), cv2.COLOR_RGB2GRAY)
+                edges = cv2.Canny(gray, 50, 150)
+                img = Image.fromarray(cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB))
+            except Exception as e:
+                st.warning(f"Grid detection failed: {e}")
+        st.session_state.processed_image = img
         st.rerun()
 
     if st.button("Reset to Original"):
-        st.session_state.processed_image = st.session_state.uploaded_image
-        st.session_state.contrast = 100
-        st.session_state.brightness = 100
+        st.session_state.processed_image = st.session_state.uploaded_image.copy()
+        st.session_state.contrast = 1.0
+        st.session_state.brightness = 1.0
         st.session_state.rotation = 0
         st.session_state.noise_reduction = False
         st.session_state.edge_enhancement = False
@@ -114,25 +153,29 @@ elif st.session_state.step == 2:
         st.rerun()
 
     if st.button("Auto Optimize"):
-        # Placeholder for auto optimization logic
-        pass
+        img = st.session_state.uploaded_image.copy()
+        img = ImageOps.autocontrast(img)
+        st.session_state.processed_image = img
+        st.rerun()
 
     col_back_next = st.columns(2)
     with col_back_next[0]:
         if st.button("Back"):
             st.session_state.step = 1
+            st.rerun()
     with col_back_next[1]:
         if st.button("Next Step", type="primary"):
             st.session_state.step = 3
+            st.rerun()
 
 else:
     # For steps 3-5, render the canvas with processed image injected
+    base64_img = ""
     if st.session_state.processed_image:
-        base64_img = base64.b64encode(st.session_state.processed_image).decode()
-    else:
-        base64_img = ""
+        buffer = io.BytesIO()
+        st.session_state.processed_image.save(buffer, format="PNG")
+        base64_img = base64.b64encode(buffer.getvalue()).decode()
 
-    # HTML content with modifications: remove image-upload, inject base64, add currentStep
     html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -152,7 +195,6 @@ else:
     </div>
     <div id="controls" aria-label="Controls Panel">
       <h3>Graph Digitizer Pro</h3>
-      <!-- Removed image-upload input, image loaded via JS -->
       <details id="view-details" open>
         <summary>View</summary>
         <button id="zoom-in" title="Zoom In (+)">Zoom In</button>
@@ -235,28 +277,24 @@ else:
 
     st.components.v1.html(html_content, height=800, scrolling=True)
 
-    # Additional Streamlit controls for steps 3-5
     if st.session_state.step == 3:
         st.header("Axis Calibration")
-        # Graph type selection as in picture
         graph_type = st.radio("Graph Type", ["Line Graph", "Bar Chart", "Scatter Plot"])
-        # Other calibration info can be handled in JS
         col_back_next = st.columns(2)
         with col_back_next[0]:
             if st.button("Back"):
                 st.session_state.step = 2
+                st.rerun()
         with col_back_next[1]:
             if st.button("Next Step", type="primary"):
                 st.session_state.step = 4
+                st.rerun()
 
     elif st.session_state.step == 4:
         st.header("Data Extraction")
         st.session_state.mode = st.radio("Mode", ["Preview Mode", "Manual Mode", "Automatic Mode"])
-        # Extracted data table (placeholder, sync with JS if possible)
         st.subheader("Extracted Data")
-        # Could use st.dataframe, but for now assume JS handles preview
         st.subheader("Data Summary")
-        # Placeholder metrics
         st.metric("Points Detected", "247")
         st.metric("Confidence", "98.5%")
         st.metric("Data Series", "1")
@@ -266,22 +304,21 @@ else:
         auto_connect = st.checkbox("Auto-connect points")
         remove_outliers = st.checkbox("Remove outliers")
         if st.button("Re-run Extraction"):
-            # Placeholder for auto extraction logic
             pass
         col_back_next = st.columns(2)
         with col_back_next[0]:
             if st.button("Back"):
                 st.session_state.step = 3
+                st.rerun()
         with col_back_next[1]:
             if st.button("Next Step", type="primary"):
                 st.session_state.step = 5
+                st.rerun()
 
     elif st.session_state.step == 5:
         st.header("Export")
         st.success("Data Successfully Extracted!")
-        # Download buttons (sync with JS exports if needed)
         if st.button("Download CSV"):
-            # Placeholder
             pass
         if st.button("Download JSON"):
             pass
@@ -291,7 +328,6 @@ else:
         include_headers = st.checkbox("Include headers")
         round_values = st.checkbox("Round values")
         decimal_places = st.selectbox("Decimal places", [0, 1, 2, 3, 4])
-        # Metadata
         dataset_name = st.text_input("Dataset name", "Enter dataset name")
         x_label = st.text_input("X-axis label", "e.g., Time (s)")
         y_label = st.text_input("Y-axis label", "e.g., Temperature (°C)")
@@ -299,3 +335,4 @@ else:
         with col_back_next[0]:
             if st.button("Back"):
                 st.session_state.step = 4
+                st.rerun()
