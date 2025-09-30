@@ -327,11 +327,13 @@ function drawMagnifier(clientX, clientY) {
   magnifier.style.top = `${magY}px`;
   magnifier.style.display = 'block';
 
-  // Calculate source rectangle in image coordinates
-  const srcWidth = magnifier.width / magnifierZoom;
-  const srcHeight = magnifier.height / magnifierZoom;
-  const srcX = x - srcWidth / 2;
-  const srcY = y - srcHeight / 2;
+  // Calculate source rectangle in image coordinates (unscaled canvas coords map to image coords)
+  const imgX = x * (img.width / canvas.width);
+  const imgY = y * (img.height / canvas.height);
+  const srcWidth = (magnifier.width / magnifierZoom) * (img.width / canvas.width);
+  const srcHeight = (magnifier.height / magnifierZoom) * (img.height / canvas.height);
+  const srcX = imgX - srcWidth / 2;
+  const srcY = imgY - srcHeight / 2;
 
   magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
   magCtx.drawImage(
@@ -340,14 +342,17 @@ function drawMagnifier(clientX, clientY) {
     0, 0, magnifier.width, magnifier.height
   );
 
-  // Draw crosshair
+  // Draw crosshair at center
   magCtx.beginPath();
-  magCtx.strokeStyle = 'black';
-  magCtx.lineWidth = 1;
-  magCtx.moveTo(magnifier.width / 2, 0);
-  magCtx.lineTo(magnifier.width / 2, magnifier.height);
-  magCtx.moveTo(0, magnifier.height / 2);
-  magCtx.lineTo(magnifier.width, magnifier.height / 2);
+  magCtx.strokeStyle = 'red';
+  magCtx.lineWidth = 2;
+  const centerX = magnifier.width / 2;
+  const centerY = magnifier.height / 2;
+  const crossSize = 10;
+  magCtx.moveTo(centerX - crossSize, centerY);
+  magCtx.lineTo(centerX + crossSize, centerY);
+  magCtx.moveTo(centerX, centerY - crossSize);
+  magCtx.lineTo(centerX, centerY + crossSize);
   magCtx.stroke();
 }
 
@@ -480,14 +485,24 @@ canvas.addEventListener('mousemove', e => {
   let dataY = dataCoords ? dataCoords.dataY : y;
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
-  // Handle orthogonal axes snapping for axes mode
-  if (mode === 'axes' && orthogonalAxes.checked) {
-    if ((sharedOrigin.checked && axisPoints.length === 2) || (!sharedOrigin.checked && axisPoints.length === 1)) { // snapping for X2
-      y = axisPoints[0].y;
-    } else if (!sharedOrigin.checked && axisPoints.length === 2) { // snapping for Y1
-      x = axisPoints[0].x;
-    } else if ((sharedOrigin.checked && axisPoints.length === 3) || (!sharedOrigin.checked && axisPoints.length === 3)) { // snapping for Y2
-      x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
+// Handle orthogonal axes snapping for axes mode
+  if (mode === 'axes' && orthogonalAxes.checked && axisPoints.length > 0) {
+    if (sharedOrigin.checked) {
+      // Shared origin: points are [Origin(X1/Y1), X2, Y2]
+      if (axisPoints.length === 1) { // Setting X2 - snap Y to origin
+        y = axisPoints[0].y;
+      } else if (axisPoints.length === 2) { // Setting Y2 - snap X to origin
+        x = axisPoints[0].x;
+      }
+    } else {
+      // Separate origins: points are [X1, X2, Y1, Y2]
+      if (axisPoints.length === 1) { // Setting X2 - snap Y to X1
+        y = axisPoints[0].y;
+      } else if (axisPoints.length === 2) { // Setting Y1 - snap X to X1
+        x = axisPoints[0].x;
+      } else if (axisPoints.length === 3) { // Setting Y2 - snap X to Y1
+        x = axisPoints[2].x;
+      }
     }
   }
 
@@ -586,27 +601,37 @@ canvas.addEventListener('mousedown', e => {
     return;
   }
 
-  if (e.button === 0 && mode === 'axes') {
+if (e.button === 0 && mode === 'axes') {
     let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-    if (orthogonalAxes.checked) {
-      if ((sharedOrigin.checked && axisPoints.length === 2) || (!sharedOrigin.checked && axisPoints.length === 1)) { // snapping for X2
-        y = axisPoints[0].y;
-      } else if (!sharedOrigin.checked && axisPoints.length === 2) { // snapping for Y1
-        x = axisPoints[0].x;
-      } else if ((sharedOrigin.checked && axisPoints.length === 3) || (!sharedOrigin.checked && axisPoints.length === 3)) { // snapping for Y2
-        x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
+    
+    // Apply orthogonal snapping
+    if (orthogonalAxes.checked && axisPoints.length > 0) {
+      if (sharedOrigin.checked) {
+        if (axisPoints.length === 1) { // Setting X2 - snap Y to origin
+          y = axisPoints[0].y;
+        } else if (axisPoints.length === 2) { // Setting Y2 - snap X to origin
+          x = axisPoints[0].x;
+        }
+      } else {
+        if (axisPoints.length === 1) { // Setting X2 - snap Y to X1
+          y = axisPoints[0].y;
+        } else if (axisPoints.length === 2) { // Setting Y1 - snap X to X1
+          x = axisPoints[0].x;
+        } else if (axisPoints.length === 3) { // Setting Y2 - snap X to Y1
+          x = axisPoints[2].x;
+        }
       }
     }
+    
     if (sharedOrigin.checked && axisPoints.length === 0) {
-      // Set both X1 and Y1 to the same point
-      axisPoints.push({ x, y, label: 'X1' });
-      axisPoints.push({ x, y, label: 'Y1' });
+      // Set shared origin (both X1 and Y1)
+      axisPoints.push({ x, y, label: 'Origin' });
       axisInstruction.textContent = `Click point for X2 on the chart.`;
-    } else if (sharedOrigin.checked && axisPoints.length === 2) {
+    } else if (sharedOrigin.checked && axisPoints.length === 1) {
       // Set X2
       axisPoints.push({ x, y, label: 'X2' });
       axisInstruction.textContent = `Click point for Y2 on the chart.`;
-    } else if (sharedOrigin.checked && axisPoints.length === 3) {
+    } else if (sharedOrigin.checked && axisPoints.length === 2) {
       // Set Y2
       axisPoints.push({ x, y, label: 'Y2' });
       axisInstruction.textContent = 'Enter axis values and click Calibrate.';
@@ -622,10 +647,11 @@ canvas.addEventListener('mousedown', e => {
       }
     }
     axisInputs.style.display = 'block';
-    calibrateBtn.disabled = axisPoints.length !== 4;
+    calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
     draw();
     saveState();
     saveSession();
+  }
   } else if (e.button === 0 && mode === 'add' && isCalibrated) {
     const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     let dataCoords = canvasToDataCoords(x, y);
@@ -794,15 +820,34 @@ calibrateBtn.addEventListener('click', () => {
     showModal('Axis values must be different');
     return;
   }
-  if (axisPoints.length !== 4) {
-    showModal(`Please set axis points (${sharedOrigin.checked ? 'X1/Y1, X2, Y2' : 'X1, X2, Y1, Y2'})`);
+  
+  const expectedPoints = sharedOrigin.checked ? 3 : 4;
+  if (axisPoints.length !== expectedPoints) {
+    showModal(`Please set ${expectedPoints} axis point${expectedPoints > 1 ? 's' : ''} first`);
     return;
   }
-  if (Math.abs(axisPoints[1].x - axisPoints[0].x) < 1e-10) {
+  
+  // Get pixel coordinates based on shared origin mode
+  let x1Pix, x2Pix, y1Pix, y2Pix;
+  if (sharedOrigin.checked) {
+    // Shared origin: [Origin, X2, Y2]
+    x1Pix = axisPoints[0].x;
+    x2Pix = axisPoints[1].x;
+    y1Pix = axisPoints[0].y;
+    y2Pix = axisPoints[2].y;
+  } else {
+    // Separate: [X1, X2, Y1, Y2]
+    x1Pix = axisPoints[0].x;
+    x2Pix = axisPoints[1].x;
+    y1Pix = axisPoints[2].y;
+    y2Pix = axisPoints[3].y;
+  }
+  
+  if (Math.abs(x2Pix - x1Pix) < 1e-10) {
     showModal('X-axis points must have distinct x-coordinates');
     return;
   }
-  if (Math.abs(axisPoints[3].y - axisPoints[sharedOrigin.checked ? 1 : 2].y) < 1e-10) {
+  if (Math.abs(y2Pix - y1Pix) < 1e-10) {
     showModal('Y-axis points must have distinct y-coordinates');
     return;
   }
@@ -815,9 +860,6 @@ calibrateBtn.addEventListener('click', () => {
     return;
   }
 
-  const x1Pix = axisPoints[0].x, x2Pix = axisPoints[1].x;
-  const y1Pix = axisPoints[sharedOrigin.checked ? 1 : 2].y;
-  const y2Pix = axisPoints[3].y;
   const deltaPixX = x2Pix - x1Pix;
   const deltaPixY = y2Pix - y1Pix;
   const deltaValX = logX ? Math.log10(x2Val) - Math.log10(x1Val) : x2Val - x1Val;
@@ -859,6 +901,19 @@ calibrateBtn.addEventListener('click', () => {
   saveSession();
   draw();
   updatePreview();
+
+  lines.forEach(line => {
+    line.points.forEach(p => {
+      let dataCoords = canvasToDataCoords(p.x, p.y);
+      if (dataCoords) {
+        p.dataX = dataCoords.dataX;
+        p.dataY = dataCoords.dataY;
+        console.log(`Recalculated point: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${p.dataX.toFixed(15)}, dataY=${p.dataY.toFixed(15)}`);
+      }
+    });
+  });
+  updatePreview();
+});
 
   lines.forEach(line => {
     line.points.forEach(p => {
