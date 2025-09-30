@@ -89,8 +89,7 @@ html_content = f"""
         <button id="export-json" title="Export JSON data">Export JSON</button>
         <button id="export-csv" title="Export CSV data">Export CSV</button>
         <button id="export-xlsx" title="Export XLSX data">Export XLSX</button>
-        <button id="clear-session" title="Clear saved session">Clear Session</button>
-        <button id="total-reset" title="Reset all calibration and data">Total Reset</button>
+        <button id="clear-session" title="Clear all calibration and data">Clear Session</button>
       </details>
       <details>
         <summary>Preview Data</summary>
