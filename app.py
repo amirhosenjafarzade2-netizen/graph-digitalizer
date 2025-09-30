@@ -6,10 +6,10 @@ st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 try:
     with open("styles.css", "r") as f:
         css = f.read()
-    with open("core.js", "r") as f:
-        core_js = f.read()
     with open("data-history.js", "r") as f:
         data_history_js = f.read()
+    with open("core.js", "r") as f:
+        core_js = f.read()
     with open("point-line.js", "r") as f:
         point_line_js = f.read()
 except FileNotFoundError as e:
@@ -109,8 +109,8 @@ html_content = f"""
   </div>
   <div id="modal"><div id="modal-content"></div></div>
   <div id="spinner">Processing...</div>
-  <script>{core_js}</script>
   <script>{data_history_js}</script>
+  <script>{core_js}</script>
   <script>{point_line_js}</script>
 </body>
 </html>
