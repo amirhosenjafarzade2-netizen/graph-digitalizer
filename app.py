@@ -6,10 +6,14 @@ st.set_page_config(page_title="Graph Digitizer Pro", layout="wide")
 try:
     with open("styles.css", "r") as f:
         css = f.read()
-    with open("digitizer.js", "r") as f:
-        js = f.read()
+    with open("core.js", "r") as f:
+        core_js = f.read()
+    with open("point-line.js", "r") as f:
+        point_line_js = f.read()
+    with open("data-history.js", "r") as f:
+        data_history_js = f.read()
 except FileNotFoundError as e:
-    st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
+    st.error(f"Error: Missing file {e.filename}. Ensure styles.css, core.js, point-line.js, and data-history.js are in the same directory as app.py.")
     st.stop()
 
 # HTML content embedding CSS and JS
@@ -105,7 +109,9 @@ html_content = f"""
   </div>
   <div id="modal"><div id="modal-content"></div></div>
   <div id="spinner">Processing...</div>
-  <script>{js}</script>
+  <script>{core_js}</script>
+  <script>{point_line_js}</script>
+  <script>{data_history_js}</script>
 </body>
 </html>
 """
