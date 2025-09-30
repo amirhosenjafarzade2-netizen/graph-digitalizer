@@ -20,7 +20,7 @@ let magnifierZoom = 2; // Default magnifier zoom
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels = ['X1', 'X2', 'Y1', 'Y2'];
 
-// UI elements (removed totalResetBtn)
+// UI elements
 const imageUpload = document.getElementById('image-upload');
 const setAxesBtn = document.getElementById('set-axes');
 const resetAxisPointsBtn = document.getElementById('reset-axis-points');
@@ -75,12 +75,12 @@ function showModal(msg, withInput = false, callback = null) {
     content.appendChild(input);
   }
   const btnContainer = document.createElement('div');
-  btnContainer.style.display = 'flex'; // Added for button alignment
-  btnContainer.style.justifyContent = 'center'; // Center buttons
-  btnContainer.style.gap = '10px'; // Space between buttons
+  btnContainer.style.display = 'flex';
+  btnContainer.style.justifyContent = 'center';
+  btnContainer.style.gap = '10px';
   const okBtn = document.createElement('button');
   okBtn.textContent = 'OK';
-  okBtn.style.padding = '8px 20px'; // Consistent padding
+  okBtn.style.padding = '8px 20px';
   okBtn.onclick = () => {
     modal.style.display = 'none';
     if (callback) callback(withInput ? document.getElementById('modal-input').value : null);
@@ -88,7 +88,7 @@ function showModal(msg, withInput = false, callback = null) {
   btnContainer.appendChild(okBtn);
   const cancelBtn = document.createElement('button');
   cancelBtn.textContent = 'Cancel';
-  cancelBtn.style.padding = '8px 20px'; // Consistent padding
+  cancelBtn.style.padding = '8px 20px';
   cancelBtn.onclick = () => { modal.style.display = 'none'; };
   btnContainer.appendChild(cancelBtn);
   content.appendChild(btnContainer);
@@ -132,6 +132,8 @@ function loadSession() {
       toggleLogXBtn.classList.toggle('log-active', logX);
       toggleLogYBtn.classList.toggle('log-active', logY);
       document.getElementById('magnifier-zoom').value = magnifierZoom;
+      // Ensure highlight controls are hidden unless in highlight mode
+      highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
       if (isCalibrated) {
         addPointBtn.disabled = false;
         adjustPointBtn.disabled = false;
@@ -147,6 +149,9 @@ function loadSession() {
       console.error('Failed to load session:', e);
       showModal('Failed to load session. Starting fresh.');
     }
+  } else {
+    // Ensure highlight controls are hidden on initial load
+    highlightControls.style.display = 'none';
   }
 }
 
@@ -185,7 +190,7 @@ function debounce(func, wait) {
  **********************/
 function loadImage(dataUrl) {
   showSpinner(true);
-  img.src = ''; // Clear previous image
+  img.src = '';
   img.src = dataUrl;
   img.onload = () => {
     console.log('Image loaded successfully:', { width: img.width, height: img.height, src: dataUrl });
@@ -294,24 +299,26 @@ function findNearestPointIndex(x, y) {
 /**********************
  * DRAWING
  **********************/
-// Modified to ensure magnifier tracks mouse correctly at all zoom levels
 function drawMagnifier(clientX, clientY) {
   if (!img.src || mode === 'none' || isPanning) {
     magnifier.style.display = 'none';
     return;
   }
   const { x, y } = imageToCanvasCoords(clientX, clientY);
-  // Adjust magnifier position to account for zoom and pan
   const rect = canvas.getBoundingClientRect();
-  const magX = clientX - rect.left + 20; // Offset to avoid cursor overlap
-  const magY = clientY - rect.top + 20;
-  magnifier.style.left = `${magX}px`;
-  magnifier.style.top = `${magY}px`;
+  // Center the magnifier on the mouse pointer
+  const magX = clientX - rect.left - magnifier.width / 2;
+  const magY = clientY - rect.top - magnifier.height / 2;
+  // Ensure magnifier stays within window bounds
+  const boundedMagX = Math.max(0, Math.min(magX, window.innerWidth - magnifier.width));
+  const boundedMagY = Math.max(0, Math.min(magY, window.innerHeight - magnifier.height));
+  magnifier.style.left = `${boundedMagX}px`;
+  magnifier.style.top = `${boundedMagY}px`;
   magnifier.style.display = 'block';
 
   // Calculate source rectangle in image coordinates
-  const srcWidth = magnifier.width / magnifierZoom;
-  const srcHeight = magnifier.height / magnifierZoom;
+  const srcWidth = magnifier.width / magnifierZoom / zoom;
+  const srcHeight = magnifier.height / magnifierZoom / zoom;
   const srcX = x - srcWidth / 2;
   const srcY = y - srcHeight / 2;
 
@@ -388,7 +395,7 @@ const draw = debounce(() => {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 5 / zoom, 0, 2 * Math.PI);
     ctx.fill();
-    ctx.fillText(p.label || axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom); // Use p.label to ensure correct display
+    ctx.fillText(p.label || axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom);
   });
 
   // Draw points
@@ -720,6 +727,7 @@ setAxesBtn.addEventListener('click', () => {
   mode = 'axes';
   axisInputs.style.display = 'block';
   axisInstruction.textContent = `Click point for ${axisLabels[0]} on the chart.`;
+  highlightControls.style.display = 'none';
   updateButtonStates();
   draw();
 });
@@ -730,6 +738,7 @@ resetAxisPointsBtn.addEventListener('click', () => {
   axisInputs.style.display = 'block';
   axisInstruction.textContent = `Click point for ${axisLabels[0]} on the chart.`;
   calibrateBtn.disabled = true;
+  highlightControls.style.display = 'none';
   draw();
   saveState();
   saveSession();
@@ -752,6 +761,7 @@ resetCalibrationBtn.addEventListener('click', () => {
   sortPointsBtn.disabled = true;
   newLineBtn.disabled = true;
   renameLineBtn.disabled = true;
+  highlightControls.style.display = 'none';
   draw();
   saveState();
   saveSession();
@@ -831,6 +841,7 @@ calibrateBtn.addEventListener('click', () => {
   mode = 'add';
   axisInputs.style.display = 'none';
   axisInstruction.textContent = 'Calibration complete. Select a mode to digitize.';
+  highlightControls.style.display = 'none';
   updateButtonStates();
   saveState();
   saveSession();
@@ -980,9 +991,21 @@ clearSessionBtn.addEventListener('click', () => {
 /**********************
  * POINT ACTIONS
  **********************/
-addPointBtn.addEventListener('click', () => { mode = 'add'; updateButtonStates(); });
-adjustPointBtn.addEventListener('click', () => { mode = 'adjust'; updateButtonStates(); });
-deletePointBtn.addEventListener('click', () => { mode = 'delete'; updateButtonStates(); });
+addPointBtn.addEventListener('click', () => {
+  mode = 'add';
+  highlightControls.style.display = 'none';
+  updateButtonStates();
+});
+adjustPointBtn.addEventListener('click', () => {
+  mode = 'adjust';
+  highlightControls.style.display = 'none';
+  updateButtonStates();
+});
+deletePointBtn.addEventListener('click', () => {
+  mode = 'delete';
+  highlightControls.style.display = 'none';
+  updateButtonStates();
+});
 highlightLineBtn.addEventListener('click', () => {
   mode = 'highlight';
   highlightControls.style.display = 'block';
@@ -1142,6 +1165,7 @@ importJsonInput.addEventListener('change', e => {
         toggleLogXBtn.classList.toggle('log-active', logX);
         toggleLogYBtn.classList.toggle('log-active', logY);
         document.getElementById('magnifier-zoom').value = magnifierZoom;
+        highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
         if (isCalibrated) {
           addPointBtn.disabled = false;
           adjustPointBtn.disabled = false;
@@ -1193,16 +1217,16 @@ exportXlsxBtn.addEventListener('click', () => {
   try {
     const workbook = XLSX.utils.book_new();
     lines.forEach(line => {
-      if (line.points.length === 0) return; // Skip empty lines
+      if (line.points.length === 0) return;
       const sortedPoints = [...line.points].sort((a, b) => a.dataX - b.dataX);
       const data = sortedPoints.map(p => {
         const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15));
         const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15));
         return [dataX, dataY];
       });
-      data.unshift(['X', 'Y']); // Header
+      data.unshift(['X', 'Y']);
       const worksheet = XLSX.utils.aoa_to_sheet(data);
-      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_'); // Sanitize sheet name
+      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_');
       XLSX.utils.book_append_sheet(workbook, worksheet, safeName);
     });
     if (workbook.SheetNames.length === 0) {
@@ -1254,6 +1278,7 @@ undoBtn.addEventListener('click', () => {
     updateLineSelect();
     updatePreview();
     updateButtonStates();
+    highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
     if (isCalibrated) {
       addPointBtn.disabled = false;
       adjustPointBtn.disabled = false;
@@ -1309,6 +1334,7 @@ redoBtn.addEventListener('click', () => {
     updateLineSelect();
     updatePreview();
     updateButtonStates();
+    highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
     if (isCalibrated) {
       addPointBtn.disabled = false;
       adjustPointBtn.disabled = false;
@@ -1317,7 +1343,7 @@ redoBtn.addEventListener('click', () => {
       clearPointsBtn.disabled = false;
       sortPointsBtn.disabled = false;
       newLineBtn.disabled = false;
-      renameLineBtn.disabled = false;
+      renameLineBtn.disabled = true;
     } else {
       addPointBtn.disabled = true;
       adjustPointBtn.disabled = true;
