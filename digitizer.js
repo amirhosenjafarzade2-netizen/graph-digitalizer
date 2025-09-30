@@ -353,8 +353,8 @@ const draw = debounce(() => {
     ctx.lineWidth = 1 / zoom;
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[2].y - offsetY) / scaleY) : (axisPoints[2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
     for (let x = xMin; x <= xMax; x += xStep) {
@@ -433,7 +433,7 @@ canvas.addEventListener('mousemove', e => {
     } else if (axisPoints.length === 2 && !sharedOrigin.checked) { // Snapping Y1 to X1's x-coordinate
       x = axisPoints[0].x;
     } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
-      x = axisPoints[2].x;
+      x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
     }
   }
 
@@ -441,8 +441,8 @@ canvas.addEventListener('mousemove', e => {
   if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[2].y - offsetY) / scaleY) : (axisPoints[2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
 
@@ -575,22 +575,23 @@ canvas.addEventListener('mousedown', e => {
       } else if (axisPoints.length === 2 && !sharedOrigin.checked) { // Snap Y1 to X1's x
         x = axisPoints[0].x;
       } else if (axisPoints.length === 3) { // Snap Y2 to Y1's x
-        x = axisPoints[2].x;
+        x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
       }
     }
     axisPoints.push({ x, y });
-    // Handle shared origin: copy X1 to Y1 when reaching Y1 (index 2)
+    // Handle shared origin: copy X1 to Y1 when reaching X2 (index 1)
     if (sharedOrigin.checked && axisPoints.length === 2) {
       axisPoints.push({ x: axisPoints[0].x, y: axisPoints[0].y }); // Y1 = X1
-    }
-    // Update instruction based on shared origin
-    const requiredPoints = sharedOrigin.checked ? 3 : 4;
-    if (axisPoints.length < requiredPoints) {
-      axisInstruction.textContent = `Click point for ${axisLabels[sharedOrigin.checked && axisPoints.length === 2 ? 3 : axisPoints.length]} on the chart.`;
+      axisInstruction.textContent = `Click point for Y2 on the chart.`;
     } else {
-      axisInstruction.textContent = 'Enter axis values and click Calibrate.';
+      const requiredPoints = sharedOrigin.checked ? 3 : 4;
+      if (axisPoints.length < requiredPoints) {
+        axisInstruction.textContent = `Click point for ${axisLabels[axisPoints.length]} on the chart.`;
+      } else {
+        axisInstruction.textContent = 'Enter axis values and click Calibrate.';
+      }
     }
-    calibrateBtn.disabled = axisPoints.length !== requiredPoints;
+    calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
     draw();
     saveState();
     saveSession();
@@ -1131,7 +1132,7 @@ importJsonInput.addEventListener('change', e => {
         if (isCalibrated) {
           addPointBtn.disabled = false;
           adjustPointBtn.disabled = false;
-          deletePointBtn.disabled = true;
+          deletePointBtn.disabled = false;
           highlightLineBtn.disabled = false;
           clearPointsBtn.disabled = false;
           sortPointsBtn.disabled = false;
@@ -1260,7 +1261,7 @@ undoBtn.addEventListener('click', () => {
       renameLineBtn.disabled = true;
     }
     axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 3 : 4) ? `Click point for ${axisLabels[sharedOrigin.checked && axisPoints.length === 2 ? 3 : axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 3 : 4) ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
     calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
     draw();
     saveSession();
@@ -1315,7 +1316,7 @@ redoBtn.addEventListener('click', () => {
       renameLineBtn.disabled = true;
     }
     axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 3 : 4) ? `Click point for ${axisLabels[sharedOrigin.checked && axisPoints.length === 2 ? 3 : axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 3 : 4) ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
     calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
     draw();
     saveSession();
