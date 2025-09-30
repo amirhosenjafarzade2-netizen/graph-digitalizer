@@ -1,23 +1,9 @@
-:root {
-  --primary: #4CAF50;
-  --secondary: #2196F3;
-  --background: #f4f4f4;
-  --text: #333;
-  --border: #ccc;
-  --dark-bg: #333;
-  --dark-text: #eee;
-  --dark-border: #666;
-}
-
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Arial', sans-serif;
+  font-family: Arial, sans-serif;
   display: flex;
   height: 100vh;
   overflow: hidden;
-  background: var(--background);
-  color: var(--text);
-  transition: background 0.3s, color 0.3s;
 }
 
 #container {
@@ -43,8 +29,8 @@ body {
 #controls {
   flex: 1;
   padding: 15px;
-  background: var(--background);
-  border-left: 1px solid var(--border);
+  background: #f4f4f4;
+  border-left: 1px solid #ccc;
   overflow-y: auto;
   transition: transform 0.3s ease;
 }
@@ -74,7 +60,7 @@ body {
   top: 10px;
   right: 10px;
   padding: 8px;
-  background: var(--primary);
+  background: #4CAF50;
   color: white;
   border: none;
   border-radius: 5px;
@@ -87,16 +73,17 @@ body {
 
 button, input, select {
   margin: 4px 0;
-  padding: 8px;
+  padding: 6px;
+  width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--border);
+  border: 1px solid #ccc;
   border-radius: 4px;
   transition: transform 0.2s, background 0.2s;
 }
 
 button:hover {
   transform: scale(1.05);
-  background: var(--secondary);
+  background: #2196F3;
   color: white;
 }
 
@@ -108,7 +95,7 @@ button:hover {
 
 .button-group button {
   flex: 1;
-  padding: 8px;
+  padding: 6px;
 }
 
 .point-item {
@@ -130,20 +117,15 @@ summary {
   border-radius: 4px;
 }
 
-body.dark {
-  background: var(--dark-bg);
-  color: var(--dark-text);
-}
-
 body.dark #controls {
-  background: var(--dark-bg);
-  border-left: 1px solid var(--dark-border);
+  background: #333;
+  color: #eee;
 }
 
 body.dark button, body.dark input, body.dark select {
   background: #555;
-  color: var(--dark-text);
-  border: 1px solid var(--dark-border);
+  color: #fff;
+  border: 1px solid #666;
 }
 
 body.dark summary {
@@ -166,12 +148,17 @@ body.dark summary {
 }
 
 #preview-table td {
-  border: 1px solid var(--border);
-  padding: 6px;
+  border: 1px solid #ccc;
+  padding: 4px;
 }
 
-button.active, button.log-active {
-  background: var(--primary);
+button.active {
+  background-color: #4CAF50;
+  color: white;
+}
+
+button.log-active {
+  background-color: #4CAF50;
   color: white;
 }
 
@@ -194,12 +181,11 @@ button.active, button.log-active {
   border-radius: 10px;
   max-width: 400px;
   text-align: center;
-  animation: fadeIn 0.3s;
 }
 
 body.dark #modal-content {
   background: #444;
-  color: var(--dark-text);
+  color: #fff;
 }
 
 #spinner {
@@ -225,32 +211,42 @@ body.dark #modal-content {
   color: #fff;
   padding: 5px;
   font-size: 12px;
-  text-align: center;
 }
 
 #axis-inputs, #highlight-controls {
   display: none;
 }
 
-#axis-inputs p.checkbox-container, #highlight-controls p {
+#controls p, #controls div {
   display: flex;
   align-items: center;
   margin: 8px 0;
 }
 
-#axis-inputs input[type="checkbox"], #highlight-controls input[type="checkbox"] {
+#axis-inputs p.checkbox-container {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+#axis-inputs input[type="checkbox"] {
   margin-right: 8px;
   width: auto;
 }
 
-#axis-inputs input[type="number"], #highlight-controls input {
+#axis-inputs input[type="number"] {
   flex: 1;
   margin-left: 8px;
 }
 
-label {
-  margin-right: 8px;
-  white-space: nowrap;
+#highlight-controls p {
+  display: flex;
+  align-items: center;
+}
+
+#highlight-controls input {
+  flex: 1;
+  margin-left: 8px;
 }
 
 #highlight-line.holographic {
@@ -282,9 +278,4 @@ label {
   0% { background-position: 0% 50%; }
   50% { background-position: 400% 50%; }
   100% { background-position: 0% 50%; }
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: scale(0.9); }
-  to { opacity: 1; transform: scale(1); }
 }
