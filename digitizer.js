@@ -1444,8 +1444,54 @@ document.getElementById('magnifier-zoom').addEventListener('input', (e) => {
 /**********************
  * HISTORY
  **********************/
+undoBtn.addEventListener('click', () => {
+  if (historyIndex > 0) {
+    console.log(`Undo triggered: Moving from historyIndex ${historyIndex} to ${historyIndex - 1}`);
+    historyIndex--;
+    const state = history[historyIndex];
+    lines = JSON.parse(JSON.stringify(state.lines));
+    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
+    scaleX = state.scaleX;
+    scaleY = state.scaleY;
+    offsetX = state.offsetX;
+    offsetY = state.offsetY;
+    logX = state.logX;
+    logY = state.logY;
+    isCalibrated = state.isCalibrated;
+    zoom = state.zoom;
+    panX = state.panX;
+    panY = state.panY;
+    showGrid = state.showGrid;
+    mode = state.mode;
+    currentLineIndex = state.currentLineIndex;
+    magnifierZoom = state.magnifierZoom;
+    highlightPath = state.highlightPath || []; // Restore highlightPath
+    isHighlighting = state.isHighlighting || false; // Restore isHighlighting
+    toggleLogXBtn.classList.toggle('log-active', logX);
+    toggleLogYBtn.classList.toggle('log-active', logY);
+    document.getElementById('magnifier-zoom').value = magnifierZoom;
+    updateLineSelect();
+    updatePreview();
+    updateButtonStates();
+    highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
+    axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
+    updateAxisLabels();
+    calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' :
+      axisPoints.length < (sharedOrigin.checked ? 3 : 4) ?
+      `Click point for ${sharedOrigin.checked && axisPoints.length === 0 ? 'Shared Origin (X1/Y1)' : axisLabels[axisPoints.length]} on the chart.` :
+      'Enter axis values and click Calibrate.';
+    draw();
+    saveSession();
+    console.log('Undo complete:', { historyIndex, mode, linesLength: lines.length, axisPointsLength: axisPoints.length });
+  }
+  undoBtn.disabled = historyIndex <= 0;
+  redoBtn.disabled = historyIndex >= history.length - 1;
+});
+
 redoBtn.addEventListener('click', () => {
   if (historyIndex < history.length - 1) {
+    console.log(`Redo triggered: Moving from historyIndex ${historyIndex} to ${historyIndex + 1}`);
     historyIndex++;
     const state = history[historyIndex];
     lines = JSON.parse(JSON.stringify(state.lines));
@@ -1464,6 +1510,8 @@ redoBtn.addEventListener('click', () => {
     mode = state.mode;
     currentLineIndex = state.currentLineIndex;
     magnifierZoom = state.magnifierZoom;
+    highlightPath = state.highlightPath || []; // Restore highlightPath
+    isHighlighting = state.isHighlighting || false; // Restore isHighlighting
     toggleLogXBtn.classList.toggle('log-active', logX);
     toggleLogYBtn.classList.toggle('log-active', logY);
     document.getElementById('magnifier-zoom').value = magnifierZoom;
@@ -1480,6 +1528,7 @@ redoBtn.addEventListener('click', () => {
       'Enter axis values and click Calibrate.';
     draw();
     saveSession();
+    console.log('Redo complete:', { historyIndex, mode, linesLength: lines.length, axisPointsLength: axisPoints.length });
   }
   undoBtn.disabled = historyIndex <= 0;
   redoBtn.disabled = historyIndex >= history.length - 1;
