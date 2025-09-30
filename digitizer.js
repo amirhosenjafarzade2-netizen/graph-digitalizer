@@ -107,8 +107,8 @@ function saveSession() {
 
 function loadSession() {
   const s = localStorage.getItem('digitizerState');
-  axisInputs.style.display = 'none'; // Force hidden initially
-  highlightControls.style.display = 'none'; // Force hidden initially
+  axisInputs.style.display = 'none';
+  highlightControls.style.display = 'none';
   if (s) {
     try {
       const state = JSON.parse(s);
@@ -168,6 +168,7 @@ function loadSession() {
         axisPoints.length < (sharedOrigin.checked ? 3 : 4) ?
         `Click point for ${sharedOrigin.checked && axisPoints.length === 0 ? 'Shared Origin (X1/Y1)' : axisLabels[axisPoints.length]} on the chart.` :
         'Enter axis values and click Calibrate.';
+      draw();
     } catch (e) {
       console.error('Failed to load session:', e);
       showModal('Failed to load session. Starting fresh.');
@@ -203,25 +204,11 @@ function download(filename, text, mimeType) {
   a.click();
 }
 
-function throttle(func, limit) {
-  let inThrottle;
-  let lastFunc;
-  let lastRan;
+function debounce(func, wait) {
+  let timeout;
   return function (...args) {
-    if (!inThrottle) {
-      func(...args);
-      lastRan = Date.now();
-      inThrottle = true;
-      setTimeout(() => {
-        inThrottle = false;
-        if (lastFunc) {
-          lastFunc();
-          lastFunc = null;
-        }
-      }, limit);
-    } else {
-      lastFunc = () => func(...args);
-    }
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
   };
 }
 
@@ -230,12 +217,17 @@ function throttle(func, limit) {
  **********************/
 function loadImage(dataUrl) {
   showSpinner(true);
+  console.log('Attempting to load image with dataUrl:', dataUrl.substring(0, 50) + '...');
   img.src = ''; // Clear previous image
   img.src = dataUrl;
   img.onload = () => {
-    console.log('Image loaded:', { width: img.width, height: img.height, src: dataUrl });
-    if (img.width <= 0 || img.height <= 0) {
-      console.error('Invalid image dimensions:', img.width, img.height);
+    console.log('Image loaded successfully:', {
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+      src: dataUrl.substring(0, 50) + '...'
+    });
+    if (img.naturalWidth <= 0 || img.naturalHeight <= 0) {
+      console.error('Invalid image dimensions:', img.naturalWidth, img.naturalHeight);
       showModal('Image has invalid dimensions. Please try another image.');
       showSpinner(false);
       return;
@@ -243,14 +235,15 @@ function loadImage(dataUrl) {
     zoom = 1;
     panX = 0;
     panY = 0;
-    canvas.width = Math.min(img.width, window.innerWidth * 0.8);
-    canvas.height = canvas.width * (img.height / img.width);
-    if (canvas.width === 0 || canvas.height === 0) {
-      console.error('Calculated canvas dimensions invalid:', canvas.width, canvas.height);
+    canvas.width = Math.min(img.naturalWidth, window.innerWidth * 0.8);
+    canvas.height = canvas.width * (img.naturalHeight / img.naturalWidth);
+    if (canvas.width <= 0 || canvas.height <= 0) {
+      console.error('Invalid canvas dimensions:', canvas.width, canvas.height);
       showModal('Invalid canvas dimensions. Please try another image.');
       showSpinner(false);
       return;
     }
+    console.log('Canvas resized:', { width: canvas.width, height: canvas.height });
     draw();
     setAxesBtn.disabled = false;
     resetAxisPointsBtn.disabled = false;
@@ -260,8 +253,8 @@ function loadImage(dataUrl) {
     document.dispatchEvent(new Event('imageLoaded'));
   };
   img.onerror = () => {
-    console.error('Image load failed: src=', dataUrl);
-    showModal('Failed to load image. Please try another image or check file integrity.');
+    console.error('Image load failed: src=', dataUrl.substring(0, 50) + '...');
+    showModal('Failed to load image. Please check file format or try another image.');
     showSpinner(false);
   };
 }
@@ -357,49 +350,98 @@ function findNearestPointIndex(x, y) {
 /**********************
  * DRAWING
  **********************/
+function throttle(func, limit) {
+  let inThrottle;
+  let lastFunc;
+  let lastRan;
+  return function (...args) {
+    if (!inThrottle) {
+      func(...args);
+      lastRan = Date.now();
+      inThrottle = true;
+      setTimeout(() => {
+        inThrottle = false;
+        if (lastFunc) {
+          lastFunc();
+          lastFunc = null;
+        }
+      }, limit);
+    } else {
+      lastFunc = () => func(...args);
+    }
+  };
+}
+
 const drawMagnifier = throttle((clientX, clientY) => {
-  if (!img.src || mode === 'none' || isPanning) {
+  if (!img.src || !img.complete || img.naturalWidth === 0 || mode === 'none' || isPanning) {
     magnifier.style.display = 'none';
+    console.log('Magnifier skipped:', {
+      imgSrc: img.src,
+      complete: img.complete,
+      naturalWidth: img.naturalWidth,
+      mode: mode,
+      isPanning: isPanning
+    });
     return;
   }
   const { x, y } = imageToCanvasCoords(clientX, clientY);
   const rect = canvas.getBoundingClientRect();
-  let magX = clientX - rect.left - magnifier.width / 2;
-  let magY = clientY - rect.top - magnifier.height / 2;
+  // Position magnifier with bottom-left corner at mouse pointer
+  let magX = clientX - rect.left;
+  let magY = clientY - rect.top;
   magX = Math.max(0, Math.min(magX, rect.width - magnifier.width));
   magY = Math.max(0, Math.min(magY, rect.height - magnifier.height));
   magnifier.style.left = `${magX}px`;
   magnifier.style.top = `${magY}px`;
   magnifier.style.display = 'block';
 
+  // Calculate source image coordinates for magnifier
   const imgX = x * (img.width / canvas.width);
   const imgY = y * (img.height / canvas.height);
   const srcWidth = (magnifier.width / magnifierZoom) * (img.width / canvas.width);
   const srcHeight = (magnifier.height / magnifierZoom) * (img.height / canvas.height);
-  const srcX = imgX - srcWidth / 2;
-  const srcY = imgY - srcHeight / 2;
+  let srcX = imgX - srcWidth / 2;
+  let srcY = imgY - srcHeight / 2;
 
+  // Clamp source coordinates to image bounds
+  srcX = Math.max(0, Math.min(srcX, img.width - srcWidth));
+  srcY = Math.max(0, Math.min(srcY, img.height - srcHeight));
+
+  // Draw zoomed image in magnifier
   magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
-  magCtx.drawImage(
-    img,
-    srcX, srcY, srcWidth, srcHeight,
-    0, 0, magnifier.width, magnifier.height
-  );
+  try {
+    magCtx.drawImage(
+      img,
+      srcX, srcY, srcWidth, srcHeight,
+      0, 0, magnifier.width, magnifier.height
+    );
+  } catch (e) {
+    console.error('Error drawing magnifier image:', e, {
+      srcX, srcY, srcWidth, srcHeight,
+      imgWidth: img.width, imgHeight: img.height
+    });
+    magnifier.style.display = 'none';
+    return;
+  }
 
-  // Transform coordinates for magnifier
+  // Transform coordinates for drawing points in magnifier
   const magScale = magnifierZoom * zoom * (img.width / canvas.width);
   const centerX = magnifier.width / 2;
   const centerY = magnifier.height / 2;
 
   // Draw axis points
   magCtx.fillStyle = 'red';
-  axisPoints.forEach(p => {
+  axisPoints.forEach((p, i) => {
     const magPx = (p.x - x) * magScale + centerX;
     const magPy = (p.y - y) * magScale + centerY;
     if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
       magCtx.beginPath();
       magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
       magCtx.fill();
+      magCtx.fillStyle = 'white';
+      magCtx.font = '10px Arial';
+      magCtx.fillText(axisLabels[i], magPx + 8, magPy - 8);
+      magCtx.fillStyle = 'red';
     }
   });
 
@@ -422,7 +464,7 @@ const drawMagnifier = throttle((clientX, clientY) => {
     });
   });
 
-  // Draw crosshair
+  // Draw crosshair at center
   magCtx.beginPath();
   magCtx.strokeStyle = 'red';
   magCtx.lineWidth = 2;
@@ -431,9 +473,17 @@ const drawMagnifier = throttle((clientX, clientY) => {
   magCtx.moveTo(centerX, centerY - 10);
   magCtx.lineTo(centerX, centerY + 10);
   magCtx.stroke();
+
+  console.log('Magnifier drawn:', { magX, magY, srcX, srcY, magScale });
 }, 16);
 
-const draw = throttle(() => {
+const draw = debounce(() => {
+  console.log('Drawing canvas:', {
+    imgLoaded: img.src && img.complete && img.naturalWidth > 0,
+    canvasWidth: canvas.width,
+    canvasHeight: canvas.height,
+    zoom, panX, panY
+  });
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(panX, panY);
@@ -442,6 +492,7 @@ const draw = throttle(() => {
   if (img.src && img.complete && img.naturalWidth > 0) {
     try {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      console.log('Image drawn on canvas:', { width: canvas.width, height: canvas.height });
     } catch (e) {
       console.error('Error drawing image:', e);
       showModal('Error drawing image on canvas. Please try another image or browser.');
@@ -452,6 +503,7 @@ const draw = throttle(() => {
     ctx.fillStyle = '#fff';
     ctx.font = '16px Arial';
     ctx.fillText(img.src ? 'Loading image...' : 'No image loaded. Please upload an image.', 10, 20);
+    console.log('No image drawn:', { imgSrc: img.src, complete: img.complete, naturalWidth: img.naturalWidth });
   }
 
   if (isCalibrated && showGrid) {
@@ -514,7 +566,7 @@ const draw = throttle(() => {
 }, 16);
 
 /**********************
- * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
+ * CATMULL-ROM SPLINE
  **********************/
 function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
   const t2 = t * t;
@@ -550,110 +602,6 @@ function drawCatmullRomPath(ctx, points, segments = 20) {
 /**********************
  * EVENT HANDLERS
  **********************/
-function throttle(func, limit) {
-  let inThrottle;
-  let lastFunc;
-  let lastRan;
-  return function (...args) {
-    if (!inThrottle) {
-      func(...args);
-      lastRan = Date.now();
-      inThrottle = true;
-      setTimeout(() => {
-        inThrottle = false;
-        if (lastFunc) {
-          lastFunc();
-          lastFunc = null;
-        }
-      }, limit);
-    } else {
-      lastFunc = () => func(...args);
-    }
-  };
-}
-
-// New drawMagnifier function
-const drawMagnifier = throttle((clientX, clientY) => {
-  if (!img.src || mode === 'none' || isPanning) {
-    magnifier.style.display = 'none';
-    return;
-  }
-  const { x, y } = imageToCanvasCoords(clientX, clientY);
-  const rect = canvas.getBoundingClientRect();
-  // Position magnifier with bottom-left corner at mouse pointer
-  let magX = clientX - rect.left;
-  let magY = clientY - rect.top;
-  // Ensure magnifier stays within canvas bounds
-  magX = Math.max(0, Math.min(magX, rect.width - magnifier.width));
-  magY = Math.max(0, Math.min(magY, rect.height - magnifier.height));
-  magnifier.style.left = `${magX}px`;
-  magnifier.style.top = `${magY}px`;
-  magnifier.style.display = 'block';
-
-  // Calculate source image coordinates for magnifier
-  const imgX = x * (img.width / canvas.width);
-  const imgY = y * (img.height / canvas.height);
-  const srcWidth = (magnifier.width / magnifierZoom) * (img.width / canvas.width);
-  const srcHeight = (magnifier.height / magnifierZoom) * (img.height / canvas.height);
-  const srcX = imgX - srcWidth / 2;
-  const srcY = imgY - srcHeight / 2;
-
-  // Draw zoomed image in magnifier
-  magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
-  magCtx.drawImage(
-    img,
-    srcX, srcY, srcWidth, srcHeight,
-    0, 0, magnifier.width, magnifier.height
-  );
-
-  // Transform coordinates for drawing points in magnifier
-  const magScale = magnifierZoom * zoom * (img.width / canvas.width);
-  const centerX = magnifier.width / 2;
-  const centerY = magnifier.height / 2;
-
-  // Draw axis points
-  magCtx.fillStyle = 'red';
-  axisPoints.forEach(p => {
-    const magPx = (p.x - x) * magScale + centerX;
-    const magPy = (p.y - y) * magScale + centerY;
-    if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
-      magCtx.beginPath();
-      magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
-      magCtx.fill();
-    }
-  });
-
-  // Draw line points
-  lines.forEach((line, lineIdx) => {
-    magCtx.fillStyle = lineColors[lineIdx % lineColors.length];
-    line.points.forEach((p, i) => {
-      const magPx = (p.x - x) * magScale + centerX;
-      const magPy = (p.y - y) * magScale + centerY;
-      if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
-        magCtx.beginPath();
-        magCtx.arc(magPx, magPy, 3, 0, 2 * Math.PI);
-        if (lineIdx === currentLineIndex && i === selectedPointIndex) {
-          magCtx.strokeStyle = 'yellow';
-          magCtx.lineWidth = 2;
-          magCtx.stroke();
-        }
-        magCtx.fill();
-      }
-    });
-  });
-
-  // Draw crosshair at center
-  magCtx.beginPath();
-  magCtx.strokeStyle = 'red';
-  magCtx.lineWidth = 2;
-  magCtx.moveTo(centerX - 10, centerY);
-  magCtx.lineTo(centerX + 10, centerY);
-  magCtx.moveTo(centerX, centerY - 10);
-  magCtx.lineTo(centerX, centerY + 10);
-  magCtx.stroke();
-}, 16);
-
-// Updated mousemove event listener
 canvas.addEventListener('mousemove', e => {
   let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
   let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
@@ -661,23 +609,21 @@ canvas.addEventListener('mousemove', e => {
   let dataY = dataCoords ? dataCoords.dataY : y;
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
-  // Handle orthogonal axes snapping for axes mode
   if (mode === 'axes' && orthogonalAxes.checked) {
-    if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
+    if (axisPoints.length === 1) {
       y = axisPoints[0].y;
-    } else if (axisPoints.length === 2) { // Snapping Y1 to X1's x-coordinate
+    } else if (axisPoints.length === 2) {
       x = axisPoints[0].x;
-    } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
+    } else if (axisPoints.length === 3) {
       x = axisPoints[2].x;
     }
   }
 
-  // Snap to grid for smoother adjustments if grid is enabled and in add or adjust mode
   if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[2].y - offsetY) / scaleY) : (axisPoints[2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
 
@@ -693,12 +639,10 @@ canvas.addEventListener('mousemove', e => {
     }
   }
 
-  // Call throttled magnifier drawing
   if (mode === 'axes' || mode === 'highlight' || mode === 'add' || mode === 'adjust' || mode === 'delete') {
     drawMagnifier(e.clientX, e.clientY);
   }
 
-  // Handle point dragging in adjust mode
   if (isDraggingPoint && mode === 'adjust') {
     if (!dataCoords) return;
     const { dataX, dataY } = dataCoords;
@@ -708,7 +652,6 @@ canvas.addEventListener('mousemove', e => {
     draw();
   }
 
-  // Handle highlighting
   if (isHighlighting && mode === 'highlight') {
     const last = highlightPath[highlightPath.length - 1];
     if (!last || Math.hypot(x - last.x, y - last.y) > 5 / zoom) {
@@ -730,7 +673,7 @@ imageUpload.addEventListener('change', e => {
     showModal('No file selected. Please choose an image.');
     return;
   }
-  console.log('Selected file:', file.name, file.type, file.size);
+  console.log('Selected file:', { name: file.name, type: file.type, size: file.size });
   const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
   if (!validTypes.includes(file.type)) {
     console.error('Invalid file type:', file.type);
@@ -770,17 +713,17 @@ canvas.addEventListener('mousedown', e => {
     if (orthogonalAxes.checked && axisPoints.length > 0) {
       if (sharedOrigin.checked) {
         if (axisPoints.length === 1) {
-          y = axisPoints[0].y; // X2 must be horizontal
+          y = axisPoints[0].y;
         } else if (axisPoints.length === 2) {
-          x = axisPoints[0].x; // Y2 must be vertical
+          x = axisPoints[0].x;
         }
       } else {
         if (axisPoints.length === 1) {
-          y = axisPoints[0].y; // X2 must be horizontal
+          y = axisPoints[0].y;
         } else if (axisPoints.length === 2) {
-          x = axisPoints[0].x; // Y1 must be vertical
+          x = axisPoints[0].x;
         } else if (axisPoints.length === 3) {
-          x = axisPoints[2].x; // Y2 must be vertical
+          x = axisPoints[2].x;
         }
       }
     }
@@ -973,13 +916,13 @@ calibrateBtn.addEventListener('click', () => {
     showModal('Axis values must be different');
     return;
   }
-  
+
   const expectedPoints = sharedOrigin.checked ? 3 : 4;
   if (axisPoints.length !== expectedPoints) {
     showModal(`Please set ${expectedPoints} axis point${expectedPoints > 1 ? 's' : ''} first`);
     return;
   }
-  
+
   let x1Pix, x2Pix, y1Pix, y2Pix;
   if (sharedOrigin.checked) {
     x1Pix = axisPoints[0].x;
@@ -992,7 +935,7 @@ calibrateBtn.addEventListener('click', () => {
     y1Pix = axisPoints[2].y;
     y2Pix = axisPoints[3].y;
   }
-  
+
   if (Math.abs(x2Pix - x1Pix) < 1e-10) {
     showModal('X-axis points must have distinct x-coordinates');
     return;
