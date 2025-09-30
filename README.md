@@ -1,3 +1,6 @@
+https://graph-digitalizer.streamlit.app/
+
+
 Graph Digitizer Pro - User Guide
 Overview
 Graph Digitizer Pro is a web-based tool built with Streamlit, HTML, CSS, and JavaScript for digitizing data from graph images. Users can upload a graph image, calibrate its axes (including logarithmic scales), add or adjust data points, trace curves, manage multiple data lines, and export data as JSON, CSV, or XLSX. This guide explains how to use the app effectively.
@@ -132,5 +135,3 @@ File Errors: Ensure styles.css and digitizer.js are in the same directory as app
 Image Issues: Use high-resolution images; low-quality images may affect accuracy.
 Export Failures: Ensure your browser allows downloads. For XLSX, verify internet access for SheetJS CDN.
 Calibration Errors: Avoid collinear axis points. Reset and retry if calibration fails.
-
-For issues, check browser console logs (F12) or contact the developer.
