@@ -203,11 +203,25 @@ function download(filename, text, mimeType) {
   a.click();
 }
 
-function debounce(func, wait) {
-  let timeout;
+function throttle(func, limit) {
+  let inThrottle;
+  let lastFunc;
+  let lastRan;
   return function (...args) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
+    if (!inThrottle) {
+      func(...args);
+      lastRan = Date.now();
+      inThrottle = true;
+      setTimeout(() => {
+        inThrottle = false;
+        if (lastFunc) {
+          lastFunc();
+          lastFunc = null;
+        }
+      }, limit);
+    } else {
+      lastFunc = () => func(...args);
+    }
   };
 }
 
@@ -343,7 +357,7 @@ function findNearestPointIndex(x, y) {
 /**********************
  * DRAWING
  **********************/
-function drawMagnifier(clientX, clientY) {
+const drawMagnifier = throttle((clientX, clientY) => {
   if (!img.src || mode === 'none' || isPanning) {
     magnifier.style.display = 'none';
     return;
@@ -372,20 +386,54 @@ function drawMagnifier(clientX, clientY) {
     0, 0, magnifier.width, magnifier.height
   );
 
+  // Transform coordinates for magnifier
+  const magScale = magnifierZoom * zoom * (img.width / canvas.width);
+  const centerX = magnifier.width / 2;
+  const centerY = magnifier.height / 2;
+
+  // Draw axis points
+  magCtx.fillStyle = 'red';
+  axisPoints.forEach(p => {
+    const magPx = (p.x - x) * magScale + centerX;
+    const magPy = (p.y - y) * magScale + centerY;
+    if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
+      magCtx.beginPath();
+      magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
+      magCtx.fill();
+    }
+  });
+
+  // Draw line points
+  lines.forEach((line, lineIdx) => {
+    magCtx.fillStyle = lineColors[lineIdx % lineColors.length];
+    line.points.forEach((p, i) => {
+      const magPx = (p.x - x) * magScale + centerX;
+      const magPy = (p.y - y) * magScale + centerY;
+      if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
+        magCtx.beginPath();
+        magCtx.arc(magPx, magPy, 3, 0, 2 * Math.PI);
+        if (lineIdx === currentLineIndex && i === selectedPointIndex) {
+          magCtx.strokeStyle = 'yellow';
+          magCtx.lineWidth = 2;
+          magCtx.stroke();
+        }
+        magCtx.fill();
+      }
+    });
+  });
+
+  // Draw crosshair
   magCtx.beginPath();
   magCtx.strokeStyle = 'red';
   magCtx.lineWidth = 2;
-  const centerX = magnifier.width / 2;
-  const centerY = magnifier.height / 2;
-  const crossSize = 10;
-  magCtx.moveTo(centerX - crossSize, centerY);
-  magCtx.lineTo(centerX + crossSize, centerY);
-  magCtx.moveTo(centerX, centerY - crossSize);
-  magCtx.lineTo(centerX, centerY + crossSize);
+  magCtx.moveTo(centerX - 10, centerY);
+  magCtx.lineTo(centerX + 10, centerY);
+  magCtx.moveTo(centerX, centerY - 10);
+  magCtx.lineTo(centerX, centerY + 10);
   magCtx.stroke();
-}
+}, 16);
 
-const draw = debounce(() => {
+const draw = throttle(() => {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(panX, panY);
@@ -512,17 +560,17 @@ canvas.addEventListener('mousemove', e => {
   if (mode === 'axes' && orthogonalAxes.checked && axisPoints.length > 0) {
     if (sharedOrigin.checked) {
       if (axisPoints.length === 1) {
-        y = axisPoints[0].y;
+        y = axisPoints[0].y; // X2 must be horizontal
       } else if (axisPoints.length === 2) {
-        x = axisPoints[0].x;
+        x = axisPoints[0].x; // Y2 must be vertical
       }
     } else {
       if (axisPoints.length === 1) {
-        y = axisPoints[0].y;
+        y = axisPoints[0].y; // X2 must be horizontal
       } else if (axisPoints.length === 2) {
-        x = axisPoints[0].x;
+        x = axisPoints[0].x; // Y1 must be vertical
       } else if (axisPoints.length === 3) {
-        x = axisPoints[2].x;
+        x = axisPoints[2].x; // Y2 must be vertical
       }
     }
   }
@@ -620,17 +668,17 @@ canvas.addEventListener('mousedown', e => {
     if (orthogonalAxes.checked && axisPoints.length > 0) {
       if (sharedOrigin.checked) {
         if (axisPoints.length === 1) {
-          y = axisPoints[0].y;
+          y = axisPoints[0].y; // X2 must be horizontal
         } else if (axisPoints.length === 2) {
-          x = axisPoints[0].x;
+          x = axisPoints[0].x; // Y2 must be vertical
         }
       } else {
         if (axisPoints.length === 1) {
-          y = axisPoints[0].y;
+          y = axisPoints[0].y; // X2 must be horizontal
         } else if (axisPoints.length === 2) {
-          x = axisPoints[0].x;
+          x = axisPoints[0].x; // Y1 must be vertical
         } else if (axisPoints.length === 3) {
-          x = axisPoints[2].x;
+          x = axisPoints[2].x; // Y2 must be vertical
         }
       }
     }
