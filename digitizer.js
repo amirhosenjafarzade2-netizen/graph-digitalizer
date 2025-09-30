@@ -387,22 +387,27 @@ const drawMagnifier = throttle((clientX, clientY) => {
     });
     return;
   }
-  const { x, y } = imageToCanvasCoords(clientX, clientY);
+
+  // Get mouse position in canvas coordinates
   const rect = canvas.getBoundingClientRect();
-  // Position magnifier with bottom-left corner at mouse pointer
-  let magX = clientX - rect.left;
-  let magY = clientY - rect.top;
-  magX = Math.max(0, Math.min(magX, rect.width - magnifier.width));
-  magY = Math.max(0, Math.min(magY, rect.height - magnifier.height));
+  const mouseX = clientX - rect.left;
+  const mouseY = clientY - rect.top;
+
+  // Position magnifier at mouse pointer
+  const magX = Math.max(0, Math.min(mouseX, rect.width - magnifier.width));
+  const magY = Math.max(0, Math.min(mouseY, rect.height - magnifier.height));
   magnifier.style.left = `${magX}px`;
   magnifier.style.top = `${magY}px`;
   magnifier.style.display = 'block';
 
-  // Calculate source image coordinates for magnifier
+  // Convert mouse position to image coordinates
+  const { x, y } = imageToCanvasCoords(clientX, clientY);
   const imgX = x * (img.width / canvas.width);
   const imgY = y * (img.height / canvas.height);
-  const srcWidth = (magnifier.width / magnifierZoom) * (img.width / canvas.width);
-  const srcHeight = (magnifier.height / magnifierZoom) * (img.height / canvas.width);
+
+  // Calculate source image coordinates for magnifier
+  const srcWidth = magnifier.width / magnifierZoom;
+  const srcHeight = magnifier.height / magnifierZoom;
   let srcX = imgX - srcWidth / 2;
   let srcY = imgY - srcHeight / 2;
 
@@ -427,42 +432,46 @@ const drawMagnifier = throttle((clientX, clientY) => {
     return;
   }
 
- // Draw points in magnifier using source image coordinates
-magCtx.fillStyle = 'red';
-axisPoints.forEach((p, i) => {
-  const magPx = (p.x - srcX) * magnifierZoom;
-  const magPy = (p.y - srcY) * magnifierZoom;
-  if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
-    magCtx.beginPath();
-    magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
-    magCtx.fill();
-    magCtx.fillStyle = 'white';
-    magCtx.font = '10px Arial';
-    magCtx.fillText(axisLabels[i], magPx + 8, magPy - 8);
-    magCtx.fillStyle = 'red';
-  }
-});
-
-// Draw line points
-lines.forEach((line, lineIdx) => {
-  magCtx.fillStyle = lineColors[lineIdx % lineColors.length];
-  line.points.forEach((p, i) => {
-    const magPx = (p.x - srcX) * magnifierZoom;
-    const magPy = (p.y - srcY) * magnifierZoom;
+  // Draw axis points
+  magCtx.fillStyle = 'red';
+  axisPoints.forEach((p, i) => {
+    // Convert point from image coordinates to magnifier coordinates
+    const magPx = (p.x * (img.width / canvas.width) - srcX) * magnifierZoom;
+    const magPy = (p.y * (img.height / canvas.height) - srcY) * magnifierZoom;
     if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
       magCtx.beginPath();
-      magCtx.arc(magPx, magPy, 3, 0, 2 * Math.PI);
-      if (lineIdx === currentLineIndex && i === selectedPointIndex) {
-        magCtx.strokeStyle = 'yellow';
-        magCtx.lineWidth = 2;
-        magCtx.stroke();
-      }
+      magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
       magCtx.fill();
+      magCtx.fillStyle = 'white';
+      magCtx.font = '10px Arial';
+      magCtx.fillText(axisLabels[i], magPx + 8, magPy - 8);
+      magCtx.fillStyle = 'red';
     }
   });
-});
+
+  // Draw line points
+  lines.forEach((line, lineIdx) => {
+    magCtx.fillStyle = lineColors[lineIdx % lineColors.length];
+    line.points.forEach((p, i) => {
+      // Convert point from image coordinates to magnifier coordinates
+      const magPx = (p.x * (img.width / canvas.width) - srcX) * magnifierZoom;
+      const magPy = (p.y * (img.height / canvas.height) - srcY) * magnifierZoom;
+      if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
+        magCtx.beginPath();
+        magCtx.arc(magPx, magPy, 3, 0, 2 * Math.PI);
+        if (lineIdx === currentLineIndex && i === selectedPointIndex) {
+          magCtx.strokeStyle = 'yellow';
+          magCtx.lineWidth = 2;
+          magCtx.stroke();
+        }
+        magCtx.fill();
+      }
+    });
+  });
 
   // Draw crosshair at center
+  const centerX = magnifier.width / 2;
+  const centerY = magnifier.height / 2;
   magCtx.beginPath();
   magCtx.strokeStyle = 'red';
   magCtx.lineWidth = 2;
@@ -472,7 +481,7 @@ lines.forEach((line, lineIdx) => {
   magCtx.lineTo(centerX, centerY + 10);
   magCtx.stroke();
 
-  console.log('Magnifier drawn:', { magX, magY, srcX, srcY, magScale });
+  console.log('Magnifier drawn:', { magX, magY, srcX, srcY, magnifierZoom });
 }, 16);
 
 const draw = debounce(() => {
