@@ -112,16 +112,6 @@ html_content = f"""
   <script>{data_history_js}</script>
   <script>{core_js}</script>
   <script>{point_line_js}</script>
-  <script>
-    // Ensure all scripts are loaded before initialization
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        if (typeof loadSession === 'function') {
-          loadSession();
-        }
-      }, 100); // Small delay to ensure script parsing
-    });
-  </script>
 </body>
 </html>
 """
