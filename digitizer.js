@@ -550,6 +550,110 @@ function drawCatmullRomPath(ctx, points, segments = 20) {
 /**********************
  * EVENT HANDLERS
  **********************/
+function throttle(func, limit) {
+  let inThrottle;
+  let lastFunc;
+  let lastRan;
+  return function (...args) {
+    if (!inThrottle) {
+      func(...args);
+      lastRan = Date.now();
+      inThrottle = true;
+      setTimeout(() => {
+        inThrottle = false;
+        if (lastFunc) {
+          lastFunc();
+          lastFunc = null;
+        }
+      }, limit);
+    } else {
+      lastFunc = () => func(...args);
+    }
+  };
+}
+
+// New drawMagnifier function
+const drawMagnifier = throttle((clientX, clientY) => {
+  if (!img.src || mode === 'none' || isPanning) {
+    magnifier.style.display = 'none';
+    return;
+  }
+  const { x, y } = imageToCanvasCoords(clientX, clientY);
+  const rect = canvas.getBoundingClientRect();
+  // Position magnifier with bottom-left corner at mouse pointer
+  let magX = clientX - rect.left;
+  let magY = clientY - rect.top;
+  // Ensure magnifier stays within canvas bounds
+  magX = Math.max(0, Math.min(magX, rect.width - magnifier.width));
+  magY = Math.max(0, Math.min(magY, rect.height - magnifier.height));
+  magnifier.style.left = `${magX}px`;
+  magnifier.style.top = `${magY}px`;
+  magnifier.style.display = 'block';
+
+  // Calculate source image coordinates for magnifier
+  const imgX = x * (img.width / canvas.width);
+  const imgY = y * (img.height / canvas.height);
+  const srcWidth = (magnifier.width / magnifierZoom) * (img.width / canvas.width);
+  const srcHeight = (magnifier.height / magnifierZoom) * (img.height / canvas.height);
+  const srcX = imgX - srcWidth / 2;
+  const srcY = imgY - srcHeight / 2;
+
+  // Draw zoomed image in magnifier
+  magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
+  magCtx.drawImage(
+    img,
+    srcX, srcY, srcWidth, srcHeight,
+    0, 0, magnifier.width, magnifier.height
+  );
+
+  // Transform coordinates for drawing points in magnifier
+  const magScale = magnifierZoom * zoom * (img.width / canvas.width);
+  const centerX = magnifier.width / 2;
+  const centerY = magnifier.height / 2;
+
+  // Draw axis points
+  magCtx.fillStyle = 'red';
+  axisPoints.forEach(p => {
+    const magPx = (p.x - x) * magScale + centerX;
+    const magPy = (p.y - y) * magScale + centerY;
+    if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
+      magCtx.beginPath();
+      magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
+      magCtx.fill();
+    }
+  });
+
+  // Draw line points
+  lines.forEach((line, lineIdx) => {
+    magCtx.fillStyle = lineColors[lineIdx % lineColors.length];
+    line.points.forEach((p, i) => {
+      const magPx = (p.x - x) * magScale + centerX;
+      const magPy = (p.y - y) * magScale + centerY;
+      if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
+        magCtx.beginPath();
+        magCtx.arc(magPx, magPy, 3, 0, 2 * Math.PI);
+        if (lineIdx === currentLineIndex && i === selectedPointIndex) {
+          magCtx.strokeStyle = 'yellow';
+          magCtx.lineWidth = 2;
+          magCtx.stroke();
+        }
+        magCtx.fill();
+      }
+    });
+  });
+
+  // Draw crosshair at center
+  magCtx.beginPath();
+  magCtx.strokeStyle = 'red';
+  magCtx.lineWidth = 2;
+  magCtx.moveTo(centerX - 10, centerY);
+  magCtx.lineTo(centerX + 10, centerY);
+  magCtx.moveTo(centerX, centerY - 10);
+  magCtx.lineTo(centerX, centerY + 10);
+  magCtx.stroke();
+}, 16);
+
+// Updated mousemove event listener
 canvas.addEventListener('mousemove', e => {
   let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
   let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
@@ -557,29 +661,23 @@ canvas.addEventListener('mousemove', e => {
   let dataY = dataCoords ? dataCoords.dataY : y;
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
-  if (mode === 'axes' && orthogonalAxes.checked && axisPoints.length > 0) {
-    if (sharedOrigin.checked) {
-      if (axisPoints.length === 1) {
-        y = axisPoints[0].y; // X2 must be horizontal
-      } else if (axisPoints.length === 2) {
-        x = axisPoints[0].x; // Y2 must be vertical
-      }
-    } else {
-      if (axisPoints.length === 1) {
-        y = axisPoints[0].y; // X2 must be horizontal
-      } else if (axisPoints.length === 2) {
-        x = axisPoints[0].x; // Y1 must be vertical
-      } else if (axisPoints.length === 3) {
-        x = axisPoints[2].x; // Y2 must be vertical
-      }
+  // Handle orthogonal axes snapping for axes mode
+  if (mode === 'axes' && orthogonalAxes.checked) {
+    if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
+      y = axisPoints[0].y;
+    } else if (axisPoints.length === 2) { // Snapping Y1 to X1's x-coordinate
+      x = axisPoints[0].x;
+    } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
+      x = axisPoints[2].x;
     }
   }
 
+  // Snap to grid for smoother adjustments if grid is enabled and in add or adjust mode
   if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[2].y - offsetY) / scaleY) : (axisPoints[2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
 
@@ -595,18 +693,22 @@ canvas.addEventListener('mousemove', e => {
     }
   }
 
+  // Call throttled magnifier drawing
   if (mode === 'axes' || mode === 'highlight' || mode === 'add' || mode === 'adjust' || mode === 'delete') {
     drawMagnifier(e.clientX, e.clientY);
   }
 
+  // Handle point dragging in adjust mode
   if (isDraggingPoint && mode === 'adjust') {
     if (!dataCoords) return;
     const { dataX, dataY } = dataCoords;
     lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY };
+    console.log(`Adjusting point ${selectedPointIndex}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     updatePreview();
     draw();
   }
 
+  // Handle highlighting
   if (isHighlighting && mode === 'highlight') {
     const last = highlightPath[highlightPath.length - 1];
     if (!last || Math.hypot(x - last.x, y - last.y) > 5 / zoom) {
