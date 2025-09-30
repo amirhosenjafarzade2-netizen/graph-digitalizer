@@ -12,8 +12,8 @@ except FileNotFoundError as e:
     st.error(f"Error: Missing file {e.filename}. Ensure styles.css and digitizer.js are in the same directory as app.py.")
     st.stop()
 
-# HTML content embedding CSS and JS
-html_content = f"""
+# HTML content as a separate string for clarity
+html_template = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -203,3 +203,16 @@ html_content = f"""
   <script>{js}</script>
 </body>
 </html>
+"""
+
+# Format the HTML content with CSS and JS
+try:
+    html_content = html_template.format(css=css, js=js)
+except Exception as e:
+    st.error(f"Error formatting HTML content: {str(e)}")
+    st.stop()
+
+# Streamlit UI
+st.title("Graph Digitizer Pro - Streamlit Edition")
+st.markdown("Upload a graph image, calibrate axes, digitize points by clicking on the canvas, and export data as JSON, CSV, or XLSX. Use the sidebar toggle on smaller screens for easier navigation.")
+st.components.v1.html(html_content, height=900, scrolling=True)
