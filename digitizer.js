@@ -1420,8 +1420,6 @@ exportXlsxBtn.addEventListener('click', () => {
       if (line.points.length === 0) return;
       // Add line name as a header
       allData.push([`${line.name}`]);
-      // Add X, Y headers
-      allData.push(['X', 'Y']);
       // Sort points by dataX and add to data
       const sortedPoints = [...line.points].sort((a, b) => a.dataX - b.dataX);
       sortedPoints.forEach(p => {
@@ -1591,6 +1589,15 @@ document.getElementById('magnifier-zoom').addEventListener('change', (e) => {
   magnifierZoom = parseFloat(e.target.value);
   if (magnifierZoom < 1) magnifierZoom = 1;
   console.log('Magnifier zoom updated:', magnifierZoom);
+  saveSession();
+  draw();
+});
+
+// Update highlight width
+document.getElementById('highlight-width').addEventListener('input', (e) => {
+  highlightWidth = parseFloat(e.target.value);
+  if (highlightWidth < 1) highlightWidth = 1; // Prevent invalid widths
+  console.log('Highlight width updated:', highlightWidth);
   saveSession();
   draw();
 });
