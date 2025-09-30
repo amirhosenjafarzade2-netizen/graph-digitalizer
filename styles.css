@@ -26,6 +26,18 @@ button, input, select {
 .point-item { display: flex; justify-content: space-between; font-size: 14px; margin: 2px 0; }
 .section { border-top: 1px solid #aaa; margin-top: 10px; padding-top: 10px; }
 details { margin: 10px 0; }
+
+/* Added for checkbox alignment */
+#axis-inputs p.checkbox-container {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+#axis-inputs input[type="checkbox"] {
+  margin-right: 5px;
+  width: auto;
+}
+
 summary { cursor: pointer; font-weight: bold; }
 body.dark #controls { background: #333; color: #eee; }
 body.dark button, body.dark input, body.dark select {
