@@ -189,7 +189,9 @@ function saveState() {
     axisPoints: JSON.parse(JSON.stringify(axisPoints)),
     scaleX, scaleY, offsetX, offsetY,
     logX, logY, isCalibrated,
-    zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom
+    zoom, panX, panY, showGrid, mode, currentLineIndex, magnifierZoom,
+    highlightPath: JSON.parse(JSON.stringify(highlightPath)),
+    isHighlighting
   });
   historyIndex++;
   undoBtn.disabled = historyIndex <= 0;
