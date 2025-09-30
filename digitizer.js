@@ -20,13 +20,13 @@ let magnifierZoom = 2; // Default magnifier zoom
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels = ['X1', 'X2', 'Y1', 'Y2'];
 
-// UI elements
+// UI elements (removed totalResetBtn)
 const imageUpload = document.getElementById('image-upload');
 const setAxesBtn = document.getElementById('set-axes');
 const resetAxisPointsBtn = document.getElementById('reset-axis-points');
 const axisInputs = document.getElementById('axis-inputs');
 const orthogonalAxes = document.getElementById('orthogonal-axes');
-const sharedOrigin = document.getElementById('shared-origin'); // New checkbox
+const sharedOrigin = document.getElementById('shared-origin');
 const axisInstruction = document.getElementById('axis-instruction');
 const calibrateBtn = document.getElementById('calibrate');
 const resetCalibrationBtn = document.getElementById('reset-calibration');
@@ -52,7 +52,6 @@ const exportJsonBtn = document.getElementById('export-json');
 const exportCsvBtn = document.getElementById('export-csv');
 const exportXlsxBtn = document.getElementById('export-xlsx');
 const clearSessionBtn = document.getElementById('clear-session');
-const totalResetBtn = document.getElementById('total-reset');
 const undoBtn = document.getElementById('undo');
 const redoBtn = document.getElementById('redo');
 const previewTable = document.getElementById('preview-table');
@@ -76,8 +75,12 @@ function showModal(msg, withInput = false, callback = null) {
     content.appendChild(input);
   }
   const btnContainer = document.createElement('div');
+  btnContainer.style.display = 'flex'; // Added for button alignment
+  btnContainer.style.justifyContent = 'center'; // Center buttons
+  btnContainer.style.gap = '10px'; // Space between buttons
   const okBtn = document.createElement('button');
   okBtn.textContent = 'OK';
+  okBtn.style.padding = '8px 20px'; // Consistent padding
   okBtn.onclick = () => {
     modal.style.display = 'none';
     if (callback) callback(withInput ? document.getElementById('modal-input').value : null);
@@ -85,7 +88,7 @@ function showModal(msg, withInput = false, callback = null) {
   btnContainer.appendChild(okBtn);
   const cancelBtn = document.createElement('button');
   cancelBtn.textContent = 'Cancel';
-  cancelBtn.style.marginLeft = '10px';
+  cancelBtn.style.padding = '8px 20px'; // Consistent padding
   cancelBtn.onclick = () => { modal.style.display = 'none'; };
   btnContainer.appendChild(cancelBtn);
   content.appendChild(btnContainer);
@@ -289,42 +292,47 @@ function findNearestPointIndex(x, y) {
 }
 
 /**********************
- * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
+ * DRAWING
  **********************/
-function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  const f1 = -tension * t3 + 2 * tension * t2 - tension * t;
-  const f2 = (2 - tension) * t3 + (tension - 3) * t2 + 1;
-  const f3 = (tension - 2) * t3 + (3 - 2 * tension) * t2 + tension * t;
-  const f4 = tension * t3 - tension * t2;
-  return {
-    x: f1 * p0.x + f2 * p1.x + f3 * p2.x + f4 * p3.x,
-    y: f1 * p0.y + f2 * p1.y + f3 * p2.y + f4 * p3.y
-  };
-}
-
-function drawCatmullRomPath(ctx, points, segments = 20) {
-  if (points.length < 2) return;
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[Math.max(0, i - 1)];
-    const p1 = points[i];
-    const p2 = points[Math.min(points.length - 1, i + 1)];
-    const p3 = points[Math.min(points.length - 1, i + 2)];
-    for (let j = 0; j <= segments; j++) {
-      const t = j / segments;
-      const point = getCatmullRomPoint(t, p0, p1, p2, p3);
-      ctx.lineTo(point.x, point.y);
-    }
+// Modified to ensure magnifier tracks mouse correctly at all zoom levels
+function drawMagnifier(clientX, clientY) {
+  if (!img.src || mode === 'none' || isPanning) {
+    magnifier.style.display = 'none';
+    return;
   }
-  ctx.stroke();
+  const { x, y } = imageToCanvasCoords(clientX, clientY);
+  // Adjust magnifier position to account for zoom and pan
+  const rect = canvas.getBoundingClientRect();
+  const magX = clientX - rect.left + 20; // Offset to avoid cursor overlap
+  const magY = clientY - rect.top + 20;
+  magnifier.style.left = `${magX}px`;
+  magnifier.style.top = `${magY}px`;
+  magnifier.style.display = 'block';
+
+  // Calculate source rectangle in image coordinates
+  const srcWidth = magnifier.width / magnifierZoom;
+  const srcHeight = magnifier.height / magnifierZoom;
+  const srcX = x - srcWidth / 2;
+  const srcY = y - srcHeight / 2;
+
+  magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
+  magCtx.drawImage(
+    img,
+    srcX, srcY, srcWidth, srcHeight,
+    0, 0, magnifier.width, magnifier.height
+  );
+
+  // Draw crosshair
+  magCtx.beginPath();
+  magCtx.strokeStyle = 'black';
+  magCtx.lineWidth = 1;
+  magCtx.moveTo(magnifier.width / 2, 0);
+  magCtx.lineTo(magnifier.width / 2, magnifier.height);
+  magCtx.moveTo(0, magnifier.height / 2);
+  magCtx.lineTo(magnifier.width, magnifier.height / 2);
+  magCtx.stroke();
 }
 
-/**********************
- * DRAWING LOOP
- **********************/
 const draw = debounce(() => {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
@@ -380,7 +388,7 @@ const draw = debounce(() => {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 5 / zoom, 0, 2 * Math.PI);
     ctx.fill();
-    ctx.fillText(axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom);
+    ctx.fillText(p.label || axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom); // Use p.label to ensure correct display
   });
 
   // Draw points
@@ -410,17 +418,45 @@ const draw = debounce(() => {
   ctx.restore();
 }, 16);
 
-// Listen for imageLoaded event to trigger redraw
-document.addEventListener('imageLoaded', () => {
-  console.log('imageLoaded event triggered');
-  draw();
-});
+/**********************
+ * CATMULL-ROM SPLINE FOR SMOOTHER HIGHLIGHT
+ **********************/
+function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const f1 = -tension * t3 + 2 * tension * t2 - tension * t;
+  const f2 = (2 - tension) * t3 + (tension - 3) * t2 + 1;
+  const f3 = (tension - 2) * t3 + (3 - 2 * tension) * t2 + tension * t;
+  const f4 = tension * t3 - tension * t2;
+  return {
+    x: f1 * p0.x + f2 * p1.x + f3 * p2.x + f4 * p3.x,
+    y: f1 * p0.y + f2 * p1.y + f3 * p2.y + f4 * p3.y
+  };
+}
+
+function drawCatmullRomPath(ctx, points, segments = 20) {
+  if (points.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[Math.min(points.length - 1, i + 1)];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    for (let j = 0; j <= segments; j++) {
+      const t = j / segments;
+      const point = getCatmullRomPoint(t, p0, p1, p2, p3);
+      ctx.lineTo(point.x, point.y);
+    }
+  }
+  ctx.stroke();
+}
 
 /**********************
  * EVENT HANDLERS
  **********************/
 canvas.addEventListener('mousemove', e => {
-  let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
+  const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
   let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
   let dataX = dataCoords ? dataCoords.dataX : x;
   let dataY = dataCoords ? dataCoords.dataY : y;
@@ -432,8 +468,8 @@ canvas.addEventListener('mousemove', e => {
       y = axisPoints[0].y;
     } else if (axisPoints.length === 2 && !sharedOrigin.checked) { // Snapping Y1 to X1's x-coordinate
       x = axisPoints[0].x;
-    } else if (axisPoints.length === 3) { // Snapping Y2 to Y1's x-coordinate
-      x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
+    } else if (axisPoints.length === 3 && !sharedOrigin.checked) { // Snapping Y2 to Y1's x-coordinate
+      x = axisPoints[2].x;
     }
   }
 
@@ -463,42 +499,7 @@ canvas.addEventListener('mousemove', e => {
 
   // Update magnifier position and content
   if (mode === 'axes' || mode === 'highlight' || mode === 'add' || mode === 'adjust' || mode === 'delete') {
-    magnifier.style.display = 'block';
-    let magnifierX = e.clientX + 10;
-    let magnifierY = e.clientY + 10;
-
-    // Center the magnifier on the point being dragged in adjust mode
-    if (isDraggingPoint && mode === 'adjust') {
-      const rect = canvas.getBoundingClientRect();
-      magnifierX = x * zoom + rect.left + panX - 50;
-      magnifierY = y * zoom + rect.top + panY - 50;
-    } else {
-      magnifierX = e.clientX + 10;
-      magnifierY = e.clientY + 10;
-    }
-
-    magnifierX = Math.max(0, Math.min(magnifierX, window.innerWidth - magnifier.width));
-    magnifierY = Math.max(0, Math.min(magnifierY, window.innerHeight - magnifier.height));
-
-    magnifier.style.left = `${magnifierX}px`;
-    magnifier.style.top = `${magnifierY}px`;
-
-    magCtx.clearRect(0, 0, magnifier.width, magnifier.height);
-    magCtx.drawImage(
-      canvas,
-      x - 25 / magnifierZoom,
-      y - 25 / magnifierZoom,
-      50 / magnifierZoom,
-      50 / magnifierZoom,
-      0, 0, 100, 100
-    );
-    magCtx.beginPath();
-    magCtx.moveTo(50, 0);
-    magCtx.lineTo(50, 100);
-    magCtx.moveTo(0, 50);
-    magCtx.lineTo(100, 50);
-    magCtx.strokeStyle = 'red';
-    magCtx.stroke();
+    drawMagnifier(e.clientX, e.clientY);
   }
 
   // Handle point dragging in adjust mode
@@ -574,24 +575,36 @@ canvas.addEventListener('mousedown', e => {
         y = axisPoints[0].y;
       } else if (axisPoints.length === 2 && !sharedOrigin.checked) { // Snap Y1 to X1's x
         x = axisPoints[0].x;
-      } else if (axisPoints.length === 3) { // Snap Y2 to Y1's x
-        x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
+      } else if (axisPoints.length === 3 && !sharedOrigin.checked) { // Snap Y2 to Y1's x
+        x = axisPoints[2].x;
       }
     }
-    axisPoints.push({ x, y });
-    // Handle shared origin: copy X1 to Y1 when reaching X2 (index 1)
-    if (sharedOrigin.checked && axisPoints.length === 2) {
-      axisPoints.push({ x: axisPoints[0].x, y: axisPoints[0].y }); // Y1 = X1
+    if (sharedOrigin.checked && axisPoints.length === 0) {
+      // Set both X1 and Y1 to the same point
+      axisPoints.push({ x, y, label: 'X1' });
+      axisPoints.push({ x, y, label: 'Y1' });
+      axisInstruction.textContent = `Click point for X2 on the chart.`;
+    } else if (sharedOrigin.checked && axisPoints.length === 2) {
+      // Set X2
+      axisPoints.push({ x, y, label: 'X2' });
       axisInstruction.textContent = `Click point for Y2 on the chart.`;
-    } else {
-      const requiredPoints = sharedOrigin.checked ? 3 : 4;
-      if (axisPoints.length < requiredPoints) {
+    } else if (sharedOrigin.checked && axisPoints.length === 3) {
+      // Set Y2
+      axisPoints.push({ x, y, label: 'Y2' });
+      axisInstruction.textContent = 'Enter axis values and click Calibrate.';
+      axisInputs.style.display = 'block';
+      calibrateBtn.disabled = false;
+    } else if (!sharedOrigin.checked && axisPoints.length < 4) {
+      // Normal axis point collection
+      axisPoints.push({ x, y, label: axisLabels[axisPoints.length] });
+      if (axisPoints.length < 4) {
         axisInstruction.textContent = `Click point for ${axisLabels[axisPoints.length]} on the chart.`;
       } else {
         axisInstruction.textContent = 'Enter axis values and click Calibrate.';
+        axisInputs.style.display = 'block';
+        calibrateBtn.disabled = false;
       }
     }
-    calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
     draw();
     saveState();
     saveSession();
@@ -919,16 +932,16 @@ toggleLogYBtn.addEventListener('click', () => {
 });
 
 /**********************
- * TOTAL RESET
+ * CLEAR SESSION
  **********************/
-totalResetBtn.addEventListener('click', () => {
-  showModal('Are you sure you want to reset all calibration and data?', false, () => {
+clearSessionBtn.addEventListener('click', () => {
+  showModal('Are you sure you want to clear all calibration and data?', false, () => {
+    img.src = '';
+    canvas.width = 0;
+    canvas.height = 0;
     axisPoints = [];
     isCalibrated = false;
-    scaleX = undefined;
-    scaleY = undefined;
-    offsetX = undefined;
-    offsetY = undefined;
+    scaleX = scaleY = offsetX = offsetY = undefined;
     logX = false;
     logY = false;
     lines = [{ name: 'Line 1', points: [] }];
