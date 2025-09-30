@@ -562,7 +562,7 @@ const draw = debounce(() => {
   });
 
   if (highlightPath.length > 1) {
-    ctx.strokeStyle = 'yellow';
+    ctx.strokeStyle = 'red';
     ctx.lineWidth = highlightWidth / zoom;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -1414,23 +1414,35 @@ exportCsvBtn.addEventListener('click', () => {
 exportXlsxBtn.addEventListener('click', () => {
   try {
     const workbook = XLSX.utils.book_new();
-    lines.forEach(line => {
+    const allData = [];
+    
+    lines.forEach((line, index) => {
       if (line.points.length === 0) return;
+      // Add line name as a header
+      allData.push([`${line.name}`]);
+      // Add X, Y headers
+      allData.push(['X', 'Y']);
+      // Sort points by dataX and add to data
       const sortedPoints = [...line.points].sort((a, b) => a.dataX - b.dataX);
-      const data = sortedPoints.map(p => {
+      sortedPoints.forEach(p => {
         const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15));
         const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15));
-        return [dataX, dataY];
+        allData.push([dataX, dataY]);
       });
-      data.unshift(['X', 'Y']);
-      const worksheet = XLSX.utils.aoa_to_sheet(data);
-      const safeName = line.name.substring(0, 31).replace(/[\\[\]*/?:]/g, '_');
-      XLSX.utils.book_append_sheet(workbook, worksheet, safeName);
+      // Add empty row after each line (except the last)
+      if (index < lines.length - 1) {
+        allData.push([]);
+      }
     });
-    if (workbook.SheetNames.length === 0) {
+
+    if (allData.length === 0) {
       showModal('No data to export.');
       return;
     }
+
+    // Create a single worksheet
+    const worksheet = XLSX.utils.aoa_to_sheet(allData);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'All_Lines');
     XLSX.writeFile(workbook, 'graph.xlsx');
   } catch (e) {
     showModal('Failed to export XLSX. Please try again.');
