@@ -156,7 +156,6 @@ body.dark summary {
   background: rgba(255, 255, 255, 0.9);
   pointer-events: none;
   display: none;
-  border-radius: 50%;
 }
 
 #preview-table {
