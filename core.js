@@ -26,7 +26,7 @@ const setAxesBtn = document.getElementById('set-axes');
 const resetAxisPointsBtn = document.getElementById('reset-axis-points');
 const axisInputs = document.getElementById('axis-inputs');
 const orthogonalAxes = document.getElementById('orthogonal-axes');
-const sharedOrigin = document.getElementById('shared-origin'); // New checkbox
+const sharedOrigin = document.getElementById('shared-origin');
 const axisInstruction = document.getElementById('axis-instruction');
 const calibrateBtn = document.getElementById('calibrate');
 const resetCalibrationBtn = document.getElementById('reset-calibration');
@@ -123,9 +123,10 @@ function loadSession() {
       mode = state.mode || 'none';
       currentLineIndex = state.currentLineIndex || 0;
       magnifierZoom = state.magnifierZoom || 2;
-      updateLineSelect();
-      updatePreview();
-      updateButtonStates();
+      // Check if required functions are defined before calling
+      if (typeof updateLineSelect === 'function') updateLineSelect();
+      if (typeof updatePreview === 'function') updatePreview();
+      if (typeof updateButtonStates === 'function') updateButtonStates();
       toggleLogXBtn.classList.toggle('log-active', logX);
       toggleLogYBtn.classList.toggle('log-active', logY);
       document.getElementById('magnifier-zoom').value = magnifierZoom;
@@ -206,7 +207,7 @@ function loadImage(dataUrl) {
     document.dispatchEvent(new Event('imageLoaded'));
   };
   img.onerror = () => {
-    showModal('Failed to load image. Please try another image or check file integrity.');
+    showModal('Failed to load session. Starting fresh.');
     console.error('Image load failed: src=', dataUrl);
     showSpinner(false);
   };
