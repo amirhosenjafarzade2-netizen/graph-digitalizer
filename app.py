@@ -48,7 +48,8 @@ html_content = f"""
         <button id="set-axes" title="Start axis calibration">Set Axis Points</button>
         <button id="reset-axis-points" title="Reset axis points">Reset Axis Points</button>
         <div id="axis-inputs">
-          <p><input type="checkbox" id="orthogonal-axes" title="Force X2 and Y2 to be orthogonal to X1 and Y1"> Orthogonal Axes</p>
+          <p class="checkbox-container"><input type="checkbox" id="shared-origin" title="Use same point for X1 and Y1"> Shared Origin (X1/Y1)</p>
+          <p class="checkbox-container"><input type="checkbox" id="orthogonal-axes" title="Force X2 and Y2 to be orthogonal to X1 and Y1"> Orthogonal Axes</p>
           <p>X1: <input type="number" id="x1-value" step="any" title="Real-world X1 value"></p>
           <p>X2: <input type="number" id="x2-value" step="any" title="Real-world X2 value"></p>
           <p>Y1: <input type="number" id="y1-value" step="any" title="Real-world Y1 value"></p>
