@@ -132,7 +132,6 @@ function loadSession() {
       toggleLogXBtn.classList.toggle('log-active', logX);
       toggleLogYBtn.classList.toggle('log-active', logY);
       document.getElementById('magnifier-zoom').value = magnifierZoom;
-      // Ensure highlight controls are hidden unless in highlight mode
       highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
       if (isCalibrated) {
         addPointBtn.disabled = false;
@@ -143,14 +142,26 @@ function loadSession() {
         sortPointsBtn.disabled = false;
         newLineBtn.disabled = false;
         renameLineBtn.disabled = false;
+      } else {
+        addPointBtn.disabled = true;
+        adjustPointBtn.disabled = true;
+        deletePointBtn.disabled = true;
+        highlightLineBtn.disabled = true;
+        clearPointsBtn.disabled = true;
+        sortPointsBtn.disabled = true;
+        newLineBtn.disabled = true;
+        renameLineBtn.disabled = true;
       }
+      axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
       draw();
     } catch (e) {
       console.error('Failed to load session:', e);
       showModal('Failed to load session. Starting fresh.');
+      axisInputs.style.display = 'none';
+      highlightControls.style.display = 'none';
     }
   } else {
-    // Ensure highlight controls are hidden on initial load
+    axisInputs.style.display = 'none';
     highlightControls.style.display = 'none';
   }
 }
@@ -190,7 +201,7 @@ function debounce(func, wait) {
  **********************/
 function loadImage(dataUrl) {
   showSpinner(true);
-  img.src = '';
+  img.src = ''; // Clear previous image
   img.src = dataUrl;
   img.onload = () => {
     console.log('Image loaded successfully:', { width: img.width, height: img.height, src: dataUrl });
@@ -307,18 +318,18 @@ function drawMagnifier(clientX, clientY) {
   const { x, y } = imageToCanvasCoords(clientX, clientY);
   const rect = canvas.getBoundingClientRect();
   // Center the magnifier on the mouse pointer
-  const magX = clientX - rect.left - magnifier.width / 2;
-  const magY = clientY - rect.top - magnifier.height / 2;
+  let magX = clientX - rect.left - magnifier.width / 2;
+  let magY = clientY - rect.top - magnifier.height / 2;
   // Ensure magnifier stays within window bounds
-  const boundedMagX = Math.max(0, Math.min(magX, window.innerWidth - magnifier.width));
-  const boundedMagY = Math.max(0, Math.min(magY, window.innerHeight - magnifier.height));
-  magnifier.style.left = `${boundedMagX}px`;
-  magnifier.style.top = `${boundedMagY}px`;
+  magX = Math.max(0, Math.min(magX, rect.width - magnifier.width));
+  magY = Math.max(0, Math.min(magY, rect.height - magnifier.height));
+  magnifier.style.left = `${magX}px`;
+  magnifier.style.top = `${magY}px`;
   magnifier.style.display = 'block';
 
   // Calculate source rectangle in image coordinates
-  const srcWidth = magnifier.width / magnifierZoom / zoom;
-  const srcHeight = magnifier.height / magnifierZoom / zoom;
+  const srcWidth = magnifier.width / magnifierZoom;
+  const srcHeight = magnifier.height / magnifierZoom;
   const srcX = x - srcWidth / 2;
   const srcY = y - srcHeight / 2;
 
@@ -368,8 +379,8 @@ const draw = debounce(() => {
     ctx.lineWidth = 1 / zoom;
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
     for (let x = xMin; x <= xMax; x += xStep) {
@@ -463,7 +474,7 @@ function drawCatmullRomPath(ctx, points, segments = 20) {
  * EVENT HANDLERS
  **********************/
 canvas.addEventListener('mousemove', e => {
-  const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
+  let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
   let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
   let dataX = dataCoords ? dataCoords.dataX : x;
   let dataY = dataCoords ? dataCoords.dataY : y;
@@ -471,12 +482,12 @@ canvas.addEventListener('mousemove', e => {
 
   // Handle orthogonal axes snapping for axes mode
   if (mode === 'axes' && orthogonalAxes.checked) {
-    if (axisPoints.length === 1) { // Snapping X2 to X1's y-coordinate
+    if ((sharedOrigin.checked && axisPoints.length === 2) || (!sharedOrigin.checked && axisPoints.length === 1)) { // snapping for X2
       y = axisPoints[0].y;
-    } else if (axisPoints.length === 2 && !sharedOrigin.checked) { // Snapping Y1 to X1's x-coordinate
+    } else if (!sharedOrigin.checked && axisPoints.length === 2) { // snapping for Y1
       x = axisPoints[0].x;
-    } else if (axisPoints.length === 3 && !sharedOrigin.checked) { // Snapping Y2 to Y1's x-coordinate
-      x = axisPoints[2].x;
+    } else if ((sharedOrigin.checked && axisPoints.length === 3) || (!sharedOrigin.checked && axisPoints.length === 3)) { // snapping for Y2
+      x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
     }
   }
 
@@ -484,8 +495,8 @@ canvas.addEventListener('mousemove', e => {
   if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
 
@@ -578,12 +589,12 @@ canvas.addEventListener('mousedown', e => {
   if (e.button === 0 && mode === 'axes') {
     let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     if (orthogonalAxes.checked) {
-      if (axisPoints.length === 1) { // Snap X2 to X1's y
+      if ((sharedOrigin.checked && axisPoints.length === 2) || (!sharedOrigin.checked && axisPoints.length === 1)) { // snapping for X2
         y = axisPoints[0].y;
-      } else if (axisPoints.length === 2 && !sharedOrigin.checked) { // Snap Y1 to X1's x
+      } else if (!sharedOrigin.checked && axisPoints.length === 2) { // snapping for Y1
         x = axisPoints[0].x;
-      } else if (axisPoints.length === 3 && !sharedOrigin.checked) { // Snap Y2 to Y1's x
-        x = axisPoints[2].x;
+      } else if ((sharedOrigin.checked && axisPoints.length === 3) || (!sharedOrigin.checked && axisPoints.length === 3)) { // snapping for Y2
+        x = axisPoints[sharedOrigin.checked ? 0 : 2].x;
       }
     }
     if (sharedOrigin.checked && axisPoints.length === 0) {
@@ -599,7 +610,6 @@ canvas.addEventListener('mousedown', e => {
       // Set Y2
       axisPoints.push({ x, y, label: 'Y2' });
       axisInstruction.textContent = 'Enter axis values and click Calibrate.';
-      axisInputs.style.display = 'block';
       calibrateBtn.disabled = false;
     } else if (!sharedOrigin.checked && axisPoints.length < 4) {
       // Normal axis point collection
@@ -608,10 +618,11 @@ canvas.addEventListener('mousedown', e => {
         axisInstruction.textContent = `Click point for ${axisLabels[axisPoints.length]} on the chart.`;
       } else {
         axisInstruction.textContent = 'Enter axis values and click Calibrate.';
-        axisInputs.style.display = 'block';
         calibrateBtn.disabled = false;
       }
     }
+    axisInputs.style.display = 'block';
+    calibrateBtn.disabled = axisPoints.length !== 4;
     draw();
     saveState();
     saveSession();
@@ -716,7 +727,7 @@ document.addEventListener('keydown', e => {
   if (e.key === '-') { zoom /= 1.2; draw(); saveSession(); }
   if (e.key === '0') { zoom = 1; panX = 0; panY = 0; draw(); saveSession(); }
   if (e.key === 'p' && isCalibrated) { addPointBtn.click(); }
-  if (e.key === 'h' && isCalibrated) { highlightLineBtn.click(); }
+  if (e.key === 'h' && isCalibrated) { highlightLineBtn(); }
 });
 
 /**********************
@@ -729,6 +740,7 @@ setAxesBtn.addEventListener('click', () => {
   axisInstruction.textContent = `Click point for ${axisLabels[0]} on the chart.`;
   highlightControls.style.display = 'none';
   updateButtonStates();
+  calibrateBtn.disabled = true;
   draw();
 });
 
@@ -762,6 +774,7 @@ resetCalibrationBtn.addEventListener('click', () => {
   newLineBtn.disabled = true;
   renameLineBtn.disabled = true;
   highlightControls.style.display = 'none';
+  calibrateBtn.disabled = true;
   draw();
   saveState();
   saveSession();
@@ -781,16 +794,15 @@ calibrateBtn.addEventListener('click', () => {
     showModal('Axis values must be different');
     return;
   }
-  const requiredPoints = sharedOrigin.checked ? 3 : 4;
-  if (axisPoints.length !== requiredPoints) {
-    showModal(`Please set ${requiredPoints} axis points (${sharedOrigin.checked ? 'X1=Y1, X2, Y2' : 'X1, X2, Y1, Y2'})`);
+  if (axisPoints.length !== 4) {
+    showModal(`Please set axis points (${sharedOrigin.checked ? 'X1/Y1, X2, Y2' : 'X1, X2, Y1, Y2'})`);
     return;
   }
   if (Math.abs(axisPoints[1].x - axisPoints[0].x) < 1e-10) {
     showModal('X-axis points must have distinct x-coordinates');
     return;
   }
-  if (!sharedOrigin.checked && Math.abs(axisPoints[3].y - axisPoints[2].y) < 1e-10) {
+  if (Math.abs(axisPoints[3].y - axisPoints[sharedOrigin.checked ? 1 : 2].y) < 1e-10) {
     showModal('Y-axis points must have distinct y-coordinates');
     return;
   }
@@ -804,8 +816,8 @@ calibrateBtn.addEventListener('click', () => {
   }
 
   const x1Pix = axisPoints[0].x, x2Pix = axisPoints[1].x;
-  const y1Pix = sharedOrigin.checked ? axisPoints[0].y : axisPoints[2].y;
-  const y2Pix = axisPoints[sharedOrigin.checked ? 2 : 3].y;
+  const y1Pix = axisPoints[sharedOrigin.checked ? 1 : 2].y;
+  const y2Pix = axisPoints[3].y;
   const deltaPixX = x2Pix - x1Pix;
   const deltaPixY = y2Pix - y1Pix;
   const deltaValX = logX ? Math.log10(x2Val) - Math.log10(x1Val) : x2Val - x1Val;
@@ -915,10 +927,10 @@ toggleLogYBtn.addEventListener('click', () => {
   if (isCalibrated) {
     const y1Val = parseFloat(document.getElementById('y1-value').value);
     const y2Val = parseFloat(document.getElementById('y2-value').value);
-    const deltaPixY = axisPoints[sharedOrigin.checked ? 2 : 3].y - axisPoints[sharedOrigin.checked ? 0 : 2].y;
+    const deltaPixY = axisPoints[3].y - axisPoints[sharedOrigin.checked ? 1 : 2].y;
     const deltaValY = logY ? Math.log10(y2Val) - Math.log10(y1Val) : y2Val - y1Val;
     scaleY = deltaPixY / deltaValY;
-    offsetY = logY ? axisPoints[sharedOrigin.checked ? 0 : 2].y - Math.log10(y1Val) * scaleY : axisPoints[sharedOrigin.checked ? 0 : 2].y - y1Val * scaleY;
+    offsetY = logY ? axisPoints[sharedOrigin.checked ? 1 : 2].y - Math.log10(y1Val) * scaleY : axisPoints[sharedOrigin.checked ? 1 : 2].y - y1Val * scaleY;
     if (!isFinite(scaleY) || Math.abs(deltaPixY) < 1e-10 || Math.abs(deltaValY) < 1e-10) {
       showModal('Invalid Y-axis scale after toggling log mode.');
       console.error('Invalid scaleY:', scaleY);
@@ -1046,32 +1058,32 @@ function updateButtonStates() {
 /**********************
  * POINT PROCESSING
  **********************/
-function interpolatePoints(path, n) {
-  if (path.length < 2) return path;
+function interpolatePoints(points, n) {
+  if (points.length < 2) return points;
   const result = [];
-  const totalLength = path.reduce((sum, p, i) => {
+  const totalLength = points.reduce((sum, p, i) => {
     if (i === 0) return 0;
-    const dx = p.x - path[i-1].x;
-    const dy = p.y - path[i-1].y;
+    const dx = p.x - points[i-1].x;
+    const dy = p.y - points[i-1].y;
     return sum + Math.sqrt(dx*dx + dy*dy);
   }, 0);
-  if (totalLength === 0) return [path[0]];
+  if (totalLength === 0) return [points[0]];
 
   const segmentLength = totalLength / (n - 1);
   let accumulatedLength = 0;
-  result.push(path[0]);
+  result.push(points[0]);
 
-  for (let i = 1; i < path.length; i++) {
-    const dx = path[i].x - path[i-1].x;
-    const dy = path[i].y - path[i-1].y;
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i].x - points[i-1].x;
+    const dy = points[i].y - points[i-1].y;
     const segment = Math.sqrt(dx*dx + dy*dy);
     accumulatedLength += segment;
 
     while (result.length < n && accumulatedLength >= segmentLength * result.length) {
       const t = (segmentLength * result.length - (accumulatedLength - segment)) / segment;
       result.push({
-        x: path[i-1].x + t * dx,
-        y: path[i-1].y + t * dy
+        x: points[i-1].x + t * dx,
+        y: points[i-1].y + t * dy
       });
     }
   }
@@ -1166,6 +1178,7 @@ importJsonInput.addEventListener('change', e => {
         toggleLogYBtn.classList.toggle('log-active', logY);
         document.getElementById('magnifier-zoom').value = magnifierZoom;
         highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
+        axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
         if (isCalibrated) {
           addPointBtn.disabled = false;
           adjustPointBtn.disabled = false;
@@ -1279,6 +1292,7 @@ undoBtn.addEventListener('click', () => {
     updatePreview();
     updateButtonStates();
     highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
+    axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
     if (isCalibrated) {
       addPointBtn.disabled = false;
       adjustPointBtn.disabled = false;
@@ -1298,9 +1312,8 @@ undoBtn.addEventListener('click', () => {
       newLineBtn.disabled = true;
       renameLineBtn.disabled = true;
     }
-    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 3 : 4) ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
-    calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
+    calibrateBtn.disabled = axisPoints.length !== 4;
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 4 : 4) ? `Click point for ${axisLabels[sharedOrigin.checked && axisPoints.length === 2 ? 1 : axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
     draw();
     saveSession();
   }
@@ -1335,6 +1348,7 @@ redoBtn.addEventListener('click', () => {
     updatePreview();
     updateButtonStates();
     highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
+    axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
     if (isCalibrated) {
       addPointBtn.disabled = false;
       adjustPointBtn.disabled = false;
@@ -1343,7 +1357,7 @@ redoBtn.addEventListener('click', () => {
       clearPointsBtn.disabled = false;
       sortPointsBtn.disabled = false;
       newLineBtn.disabled = false;
-      renameLineBtn.disabled = true;
+      renameLineBtn.disabled = false;
     } else {
       addPointBtn.disabled = true;
       adjustPointBtn.disabled = true;
@@ -1354,9 +1368,8 @@ redoBtn.addEventListener('click', () => {
       newLineBtn.disabled = true;
       renameLineBtn.disabled = true;
     }
-    axisInputs.style.display = isCalibrated ? 'none' : axisPoints.length > 0 ? 'block' : 'none';
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 3 : 4) ? `Click point for ${axisLabels[axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
-    calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
+    calibrateBtn.disabled = axisPoints.length !== 4;
+    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' : axisPoints.length < (sharedOrigin.checked ? 4 : 4) ? `Click point for ${axisLabels[sharedOrigin.checked && axisPoints.length === 2 ? 1 : axisPoints.length]} on the chart.` : 'Enter axis values and click Calibrate.';
     draw();
     saveSession();
   }
@@ -1387,3 +1400,6 @@ highlightWidthSlider.addEventListener('input', (e) => {
   highlightWidth = parseInt(e.target.value);
   draw();
 });
+
+axisInputs.style.display = 'none';
+highlightControls.style.display = 'none';
