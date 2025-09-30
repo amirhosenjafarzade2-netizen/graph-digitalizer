@@ -276,12 +276,12 @@ function canvasToDataCoords(x, y) {
     dataY = logY ? Math.pow(10, (y - offsetY) / scaleY) : (y - offsetY) / scaleY;
     if (isNaN(dataX) || isNaN(dataY) || !isFinite(dataX) || !isFinite(dataY)) {
       console.warn(`Invalid data coords: x=${x}, y=${y}, dataX=${dataX}, dataY=${dataY}`);
-      return null;
+      return { dataX: x, dataY: y }; // Fallback to pixel coords
     }
     return { dataX, dataY };
   } catch (e) {
     console.error('Error converting to data coords:', e);
-    return null;
+    return { dataX: x, dataY: y }; // Fallback to pixel coords
   }
 }
 
@@ -312,6 +312,7 @@ function updateLineSelect() {
 }
 
 function updatePreview() {
+  console.log('Updating preview table:', { lines });
   previewTable.innerHTML = '';
   if (lines.every(line => line.points.length === 0)) {
     previewTable.innerHTML = '<tr><td>No data</td></tr>';
@@ -399,7 +400,7 @@ const drawMagnifier = throttle((clientX, clientY) => {
   const imgX = x * (img.width / canvas.width);
   const imgY = y * (img.height / canvas.height);
   const srcWidth = (magnifier.width / magnifierZoom) * (img.width / canvas.width);
-  const srcHeight = (magnifier.height / magnifierZoom) * (img.height / canvas.height);
+  const srcHeight = (magnifier.height / magnifierZoom) * (img.height / canvas.width);
   let srcX = imgX - srcWidth / 2;
   let srcY = imgY - srcHeight / 2;
 
@@ -559,7 +560,12 @@ const draw = debounce(() => {
     ctx.lineWidth = highlightWidth / zoom;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    drawCatmullRomPath(ctx, highlightPath, 20);
+    ctx.beginPath();
+    ctx.moveTo(highlightPath[0].x, highlightPath[0].y);
+    for (let i = 1; i < highlightPath.length; i++) {
+      ctx.lineTo(highlightPath[i].x, highlightPath[i].y);
+    }
+    ctx.stroke();
   }
 
   ctx.restore();
@@ -604,9 +610,9 @@ function drawCatmullRomPath(ctx, points, segments = 20) {
  **********************/
 canvas.addEventListener('mousemove', e => {
   let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-  let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
-  let dataX = dataCoords ? dataCoords.dataX : x;
-  let dataY = dataCoords ? dataCoords.dataY : y;
+  let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : { dataX: x, dataY: y };
+  let dataX = dataCoords.dataX;
+  let dataY = dataCoords.dataY;
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
   if (mode === 'axes' && orthogonalAxes.checked) {
@@ -617,6 +623,9 @@ canvas.addEventListener('mousemove', e => {
     } else if (axisPoints.length === 3) {
       x = axisPoints[2].x;
     }
+    dataCoords = isCalibrated ? canvasToDataCoords(x, y) : { dataX: x, dataY: y };
+    dataX = dataCoords.dataX;
+    dataY = dataCoords.dataY;
   }
 
   if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
@@ -656,8 +665,9 @@ canvas.addEventListener('mousemove', e => {
     const last = highlightPath[highlightPath.length - 1];
     if (!last || Math.hypot(x - last.x, y - last.y) > 5 / zoom) {
       highlightPath.push({ x, y });
+      console.log(`Added highlight path point: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
+      draw();
     }
-    draw();
   }
 });
 
@@ -706,6 +716,7 @@ canvas.addEventListener('mousedown', e => {
   if (isPanning && e.buttons === 1) {
     startPan.x = e.clientX - panX;
     startPan.y = e.clientY - panY;
+    console.log('Starting pan:', { startX: startPan.x, startY: startPan.y });
     return;
   }
   if (e.button === 0 && mode === 'axes') {
@@ -727,6 +738,7 @@ canvas.addEventListener('mousedown', e => {
         }
       }
     }
+    console.log(`Adding axis point: x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
     if (sharedOrigin.checked && axisPoints.length === 0) {
       axisPoints.push({ x, y, label: 'Origin (X1/Y1)' });
       axisInstruction.textContent = 'Click point for X2 on the chart.';
@@ -755,13 +767,15 @@ canvas.addEventListener('mousedown', e => {
   } else if (e.button === 0 && mode === 'add' && isCalibrated) {
     const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     let dataCoords = canvasToDataCoords(x, y);
+    console.log('Attempting to add point:', { x, y, dataCoords });
     if (!dataCoords) {
-      showModal('Invalid point coordinates. Try again.');
+      console.error('Invalid coordinates for point addition');
+      showModal('Cannot add point: Invalid coordinates. Ensure calibration is complete.');
       return;
     }
     const { dataX, dataY } = dataCoords;
-    console.log(`Adding point: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     lines[currentLineIndex].points.push({ x, y, dataX, dataY });
+    console.log(`Added point to Line ${currentLineIndex + 1}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     updatePreview();
     draw();
     saveState();
@@ -770,6 +784,7 @@ canvas.addEventListener('mousedown', e => {
     const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     const index = findNearestPointIndex(x, y);
     if (index !== -1) {
+      console.log(`Deleting point ${index} from Line ${currentLineIndex + 1}`);
       lines[currentLineIndex].points.splice(index, 1);
       updatePreview();
       draw();
@@ -781,11 +796,13 @@ canvas.addEventListener('mousedown', e => {
     selectedPointIndex = findNearestPointIndex(x, y);
     if (selectedPointIndex !== -1) {
       isDraggingPoint = true;
+      console.log(`Starting drag for point ${selectedPointIndex} in Line ${currentLineIndex + 1}`);
     }
   } else if (e.button === 0 && mode === 'highlight' && isCalibrated && !isHighlighting) {
     const { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
     isHighlighting = true;
     highlightPath = [{ x, y }];
+    console.log('Started highlighting:', { startX: x, startY: y });
     draw();
   }
 });
@@ -794,19 +811,23 @@ canvas.addEventListener('mouseup', e => {
   if (e.button === 0 && mode === 'adjust' && isDraggingPoint) {
     isDraggingPoint = false;
     selectedPointIndex = -1;
+    console.log('Finished adjusting point');
     saveState();
     saveSession();
   } else if (e.button === 0 && mode === 'highlight' && isHighlighting) {
     isHighlighting = false;
+    console.log('Finished highlighting:', { pathLength: highlightPath.length });
     if (highlightPath.length < 2) {
+      console.warn('Highlight path too short:', highlightPath.length);
       showModal('Highlight path is too short to save.');
       highlightPath = [];
       draw();
       return;
     }
     const n = parseInt(nPointsInput.value);
-    if (n <= 0) {
-      showModal('Number of points (n) must be greater than 0');
+    if (isNaN(n) || n <= 0) {
+      console.error('Invalid number of points:', nPointsInput.value);
+      showModal('Number of points (n) must be a positive integer.');
       highlightPath = [];
       draw();
       return;
@@ -819,15 +840,19 @@ canvas.addEventListener('mouseup', e => {
       }
       lineName = `${lineName} (${suffix})`;
     }
+    console.log(`Creating new line: ${lineName} with ${n} points`);
     lines.push({ name: lineName, points: [] });
     currentLineIndex = lines.length - 1;
     const spacedPoints = interpolatePoints(highlightPath, n);
-    spacedPoints.forEach(p => {
+    spacedPoints.forEach((p, i) => {
       let dataCoords = canvasToDataCoords(p.x, p.y);
-      if (!dataCoords) return;
+      if (!dataCoords) {
+        console.warn(`Skipping invalid point ${i}: x=${p.x}, y=${p.y}`);
+        return;
+      }
       const { dataX, dataY } = dataCoords;
-      console.log(`Adding highlight point: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
       lines[currentLineIndex].points.push({ x: p.x, y: p.y, dataX, dataY });
+      console.log(`Added highlight point ${i + 1}/${n}: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     });
     highlightPath = [];
     updateLineSelect();
@@ -1142,6 +1167,7 @@ addPointBtn.addEventListener('click', () => {
   mode = 'add';
   highlightControls.style.display = 'none';
   updateButtonStates();
+  console.log('Switched to Add Point mode');
 });
 
 adjustPointBtn.addEventListener('click', () => {
@@ -1159,13 +1185,14 @@ deletePointBtn.addEventListener('click', () => {
 highlightLineBtn.addEventListener('click', () => {
   mode = 'highlight';
   highlightControls.style.display = 'block';
-  axisInputs.style.display = isCalibrated ? 'none' : 'block';
-  updateAxisLabels();
+  axisInputs.style.display = 'none';
   updateButtonStates();
+  console.log('Switched to Highlight Line mode');
 });
 
 deleteHighlightBtn.addEventListener('click', () => {
   highlightPath = [];
+  console.log('Cleared highlight path');
   draw();
   saveState();
   saveSession();
@@ -1173,6 +1200,7 @@ deleteHighlightBtn.addEventListener('click', () => {
 
 clearPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points = [];
+  console.log(`Cleared points for Line ${currentLineIndex + 1}`);
   updatePreview();
   draw();
   saveState();
@@ -1181,6 +1209,7 @@ clearPointsBtn.addEventListener('click', () => {
 
 sortPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points.sort((a, b) => a.dataX - b.dataX);
+  console.log(`Sorted points for Line ${currentLineIndex + 1}`);
   updatePreview();
   draw();
   saveState();
@@ -1200,7 +1229,10 @@ function updateButtonStates() {
  * POINT PROCESSING
  **********************/
 function interpolatePoints(points, n) {
-  if (points.length < 2) return points;
+  if (points.length < 2) {
+    console.warn('Not enough points for interpolation:', points.length);
+    return points;
+  }
   const result = [];
   const totalLength = points.reduce((sum, p, i) => {
     if (i === 0) return 0;
@@ -1208,7 +1240,10 @@ function interpolatePoints(points, n) {
     const dy = p.y - points[i-1].y;
     return sum + Math.sqrt(dx*dx + dy*dy);
   }, 0);
-  if (totalLength === 0) return [points[0]];
+  if (totalLength === 0) {
+    console.warn('Zero total length in interpolation');
+    return [points[0]];
+  }
 
   const segmentLength = totalLength / (n - 1);
   let accumulatedLength = 0;
@@ -1228,6 +1263,7 @@ function interpolatePoints(points, n) {
       });
     }
   }
+  console.log(`Interpolated ${result.length} points from ${points.length} input points`);
   return result.slice(0, n);
 }
 
@@ -1274,6 +1310,7 @@ renameLineBtn.addEventListener('click', () => {
 
 lineSelect.addEventListener('change', () => {
   currentLineIndex = parseInt(lineSelect.value);
+  console.log(`Switched to Line ${currentLineIndex + 1}: ${lines[currentLineIndex].name}`);
   updatePreview();
   draw();
   saveSession();
@@ -1327,7 +1364,7 @@ importJsonInput.addEventListener('change', e => {
           deletePointBtn.disabled = false;
           highlightLineBtn.disabled = false;
           clearPointsBtn.disabled = false;
-          sortPointsBtn.disabled = false;
+          sortPointsBtn.disabled = true;
           newLineBtn.disabled = false;
           renameLineBtn.disabled = false;
         }
@@ -1407,47 +1444,6 @@ document.getElementById('magnifier-zoom').addEventListener('input', (e) => {
 /**********************
  * HISTORY
  **********************/
-undoBtn.addEventListener('click', () => {
-  if (historyIndex > 0) {
-    historyIndex--;
-    const state = history[historyIndex];
-    lines = JSON.parse(JSON.stringify(state.lines));
-    axisPoints = JSON.parse(JSON.stringify(state.axisPoints));
-    scaleX = state.scaleX;
-    scaleY = state.scaleY;
-    offsetX = state.offsetX;
-    offsetY = state.offsetY;
-    logX = state.logX;
-    logY = state.logY;
-    isCalibrated = state.isCalibrated;
-    zoom = state.zoom;
-    panX = state.panX;
-    panY = state.panY;
-    showGrid = state.showGrid;
-    mode = state.mode;
-    currentLineIndex = state.currentLineIndex;
-    magnifierZoom = state.magnifierZoom;
-    toggleLogXBtn.classList.toggle('log-active', logX);
-    toggleLogYBtn.classList.toggle('log-active', logY);
-    document.getElementById('magnifier-zoom').value = magnifierZoom;
-    updateLineSelect();
-    updatePreview();
-    updateButtonStates();
-    highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
-    axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
-    updateAxisLabels();
-    calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
-    axisInstruction.textContent = isCalibrated ? 'Calibration complete. Select a mode to digitize.' :
-      axisPoints.length < (sharedOrigin.checked ? 3 : 4) ?
-      `Click point for ${sharedOrigin.checked && axisPoints.length === 0 ? 'Shared Origin (X1/Y1)' : axisLabels[axisPoints.length]} on the chart.` :
-      'Enter axis values and click Calibrate.';
-    draw();
-    saveSession();
-  }
-  undoBtn.disabled = historyIndex <= 0;
-  redoBtn.disabled = historyIndex >= history.length - 1;
-});
-
 redoBtn.addEventListener('click', () => {
   if (historyIndex < history.length - 1) {
     historyIndex++;
@@ -1493,21 +1489,74 @@ redoBtn.addEventListener('click', () => {
  * INITIALIZATION
  **********************/
 document.addEventListener('DOMContentLoaded', () => {
-  axisInputs.style.display = 'none';
-  highlightControls.style.display = 'none';
-  mode = 'none';
-  isCalibrated = false;
-  axisPoints = [];
-  updateAxisLabels();
-  if (localStorage.getItem('theme') === 'dark') {
-    document.body.classList.add('dark');
-  }
+  console.log('Initializing digitizer.js');
   loadSession();
+  if (document.body.classList.contains('dark')) {
+    document.body.classList.add('dark');
+  } else {
+    document.body.classList.remove('dark');
+  }
   draw();
 });
 
-const highlightWidthSlider = document.getElementById('highlight-width');
-highlightWidthSlider.addEventListener('input', (e) => {
-  highlightWidth = parseInt(e.target.value);
+// Ensure canvas resizes with window
+window.addEventListener('resize', () => {
+  if (img.src && img.complete && img.naturalWidth > 0) {
+    canvas.width = Math.min(img.naturalWidth, window.innerWidth * 0.8);
+    canvas.height = canvas.width * (img.naturalHeight / img.naturalWidth);
+    draw();
+    console.log('Canvas resized on window resize:', { width: canvas.width, height: canvas.height });
+  }
+});
+
+// Handle panning
+canvas.addEventListener('mousemove', e => {
+  if (isPanning && e.buttons === 1) {
+    panX = e.clientX - startPan.x;
+    panY = e.clientY - startPan.y;
+    draw();
+    console.log('Panning:', { panX, panY });
+  }
+});
+
+// Update magnifier zoom input
+document.getElementById('magnifier-zoom').addEventListener('change', (e) => {
+  magnifierZoom = parseFloat(e.target.value);
+  if (magnifierZoom < 1) magnifierZoom = 1;
+  console.log('Magnifier zoom updated:', magnifierZoom);
+  saveSession();
   draw();
 });
+
+// Prevent context menu on canvas to avoid interfering with right-click actions
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+});
+
+// Ensure magnifier is hidden when not in use
+canvas.addEventListener('mouseout', () => {
+  magnifier.style.display = 'none';
+  console.log('Magnifier hidden on canvas mouseout');
+});
+
+// Log mode changes for debugging
+function logModeChange(newMode) {
+  console.log(`Mode changed to: ${newMode}`, {
+    isCalibrated,
+    axisPointsLength: axisPoints.length,
+    currentLineIndex,
+    highlightPathLength: highlightPath.length,
+    isHighlighting
+  });
+}
+
+// Update button states with logging
+function updateButtonStates() {
+  addPointBtn.classList.toggle('active', mode === 'add');
+  adjustPointBtn.classList.toggle('active', mode === 'adjust');
+  deletePointBtn.classList.toggle('active', mode === 'delete');
+  highlightLineBtn.classList.toggle('active', mode === 'highlight');
+  canvas.style.cursor = isPanning ? 'move' : (mode === 'highlight' || mode === 'axes') ? 'crosshair' : 'default';
+  statusBar.textContent = `Mode: ${mode}`;
+  logModeChange(mode);
+}
