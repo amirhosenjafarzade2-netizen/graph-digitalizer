@@ -427,45 +427,40 @@ const drawMagnifier = throttle((clientX, clientY) => {
     return;
   }
 
-  // Transform coordinates for drawing points in magnifier
-  const magScale = magnifierZoom * zoom * (img.width / canvas.width);
-  const centerX = magnifier.width / 2;
-  const centerY = magnifier.height / 2;
+ // Draw points in magnifier using source image coordinates
+magCtx.fillStyle = 'red';
+axisPoints.forEach((p, i) => {
+  const magPx = (p.x - srcX) * magnifierZoom;
+  const magPy = (p.y - srcY) * magnifierZoom;
+  if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
+    magCtx.beginPath();
+    magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
+    magCtx.fill();
+    magCtx.fillStyle = 'white';
+    magCtx.font = '10px Arial';
+    magCtx.fillText(axisLabels[i], magPx + 8, magPy - 8);
+    magCtx.fillStyle = 'red';
+  }
+});
 
-  // Draw axis points
-  magCtx.fillStyle = 'red';
-  axisPoints.forEach((p, i) => {
-    const magPx = (p.x - x) * magScale + centerX;
-    const magPy = (p.y - y) * magScale + centerY;
+// Draw line points
+lines.forEach((line, lineIdx) => {
+  magCtx.fillStyle = lineColors[lineIdx % lineColors.length];
+  line.points.forEach((p, i) => {
+    const magPx = (p.x - srcX) * magnifierZoom;
+    const magPy = (p.y - srcY) * magnifierZoom;
     if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
       magCtx.beginPath();
-      magCtx.arc(magPx, magPy, 5, 0, 2 * Math.PI);
+      magCtx.arc(magPx, magPy, 3, 0, 2 * Math.PI);
+      if (lineIdx === currentLineIndex && i === selectedPointIndex) {
+        magCtx.strokeStyle = 'yellow';
+        magCtx.lineWidth = 2;
+        magCtx.stroke();
+      }
       magCtx.fill();
-      magCtx.fillStyle = 'white';
-      magCtx.font = '10px Arial';
-      magCtx.fillText(axisLabels[i], magPx + 8, magPy - 8);
-      magCtx.fillStyle = 'red';
     }
   });
-
-  // Draw line points
-  lines.forEach((line, lineIdx) => {
-    magCtx.fillStyle = lineColors[lineIdx % lineColors.length];
-    line.points.forEach((p, i) => {
-      const magPx = (p.x - x) * magScale + centerX;
-      const magPy = (p.y - y) * magScale + centerY;
-      if (magPx >= 0 && magPx <= magnifier.width && magPy >= 0 && magPy <= magnifier.height) {
-        magCtx.beginPath();
-        magCtx.arc(magPx, magPy, 3, 0, 2 * Math.PI);
-        if (lineIdx === currentLineIndex && i === selectedPointIndex) {
-          magCtx.strokeStyle = 'yellow';
-          magCtx.lineWidth = 2;
-          magCtx.stroke();
-        }
-        magCtx.fill();
-      }
-    });
-  });
+});
 
   // Draw crosshair at center
   magCtx.beginPath();
