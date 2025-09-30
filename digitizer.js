@@ -284,9 +284,13 @@ function canvasToDataCoords(x, y) {
 function updateAxisLabels() {
   const x1Label = document.querySelector('label[for="x1-value"]');
   const y1Label = document.querySelector('label[for="y1-value"]');
-  if (x1Label) x1Label.textContent = sharedOrigin.checked ? 'Shared Origin (X1/Y1):' : 'X1:';
-  if (y1Label) y1Label.style.display = sharedOrigin.checked ? 'none' : 'block';
-  document.getElementById('y1-value').style.display = sharedOrigin.checked ? 'none' : 'block';
+  if (sharedOrigin.checked) {
+    if (x1Label) x1Label.textContent = 'Shared Origin X1:';
+    if (y1Label) y1Label.textContent = 'Shared Origin Y1:';
+  } else {
+    if (x1Label) x1Label.textContent = 'X1:';
+    if (y1Label) y1Label.textContent = 'Y1:';
+  }
 }
 
 function updateLineSelect() {
@@ -388,7 +392,6 @@ const draw = debounce(() => {
   ctx.scale(zoom, zoom);
 
   if (img.src && img.complete && img.naturalWidth > 0) {
-    console.log('Drawing image:', { width: img.width, height: img.height, canvasWidth: canvas.width, canvasHeight: canvas.height });
     try {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     } catch (e) {
@@ -396,7 +399,6 @@ const draw = debounce(() => {
       showModal('Error drawing image on canvas. Please try another image or browser.');
     }
   } else {
-    console.warn('Image not drawn:', { src: img.src, complete: img.complete, naturalWidth: img.naturalWidth });
     ctx.fillStyle = '#333';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#fff';
@@ -409,8 +411,8 @@ const draw = debounce(() => {
     ctx.lineWidth = 1 / zoom;
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
     for (let x = xMin; x <= xMax; x += xStep) {
@@ -528,8 +530,8 @@ canvas.addEventListener('mousemove', e => {
   if (isCalibrated && showGrid && (mode === 'add' || mode === 'adjust')) {
     const xMin = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
     const xMax = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
-    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 1 : 2].y - offsetY) / scaleY;
-    const yMax = logY ? Math.pow(10, (axisPoints[3].y - offsetY) / scaleY) : (axisPoints[3].y - offsetY) / scaleY;
+    const yMin = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 0 : 2].y - offsetY) / scaleY;
+    const yMax = logY ? Math.pow(10, (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY) : (axisPoints[sharedOrigin.checked ? 2 : 3].y - offsetY) / scaleY;
     const xStep = (xMax - xMin) / 10;
     const yStep = (yMax - yMin) / 10;
 
@@ -553,13 +555,15 @@ canvas.addEventListener('mousemove', e => {
     if (!dataCoords) return;
     const { dataX, dataY } = dataCoords;
     lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY };
-    console.log(`Adjusting point ${selectedPointIndex}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     updatePreview();
     draw();
   }
 
   if (isHighlighting && mode === 'highlight') {
-    highlightPath.push({ x, y });
+    const last = highlightPath[highlightPath.length - 1];
+    if (!last || Math.hypot(x - last.x, y - last.y) > 5 / zoom) {
+      highlightPath.push({ x, y });
+    }
     draw();
   }
 });
@@ -811,11 +815,11 @@ calibrateBtn.addEventListener('click', () => {
   const y1Val = parseFloat(document.getElementById('y1-value').value);
   const y2Val = parseFloat(document.getElementById('y2-value').value);
 
-  if (isNaN(x1Val) || isNaN(x2Val) || (isNaN(y1Val) && !sharedOrigin.checked) || isNaN(y2Val)) {
+  if (isNaN(x1Val) || isNaN(x2Val) || isNaN(y1Val) || isNaN(y2Val)) {
     showModal('Please enter valid axis values');
     return;
   }
-  if (x1Val === x2Val || (!sharedOrigin.checked && y1Val === y2Val)) {
+  if (x1Val === x2Val || y1Val === y2Val) {
     showModal('Axis values must be different');
     return;
   }
@@ -965,10 +969,10 @@ toggleLogYBtn.addEventListener('click', () => {
   if (isCalibrated) {
     const y1Val = parseFloat(document.getElementById('y1-value').value);
     const y2Val = parseFloat(document.getElementById('y2-value').value);
-    const deltaPixY = axisPoints[3].y - axisPoints[sharedOrigin.checked ? 1 : 2].y;
+    const deltaPixY = axisPoints[sharedOrigin.checked ? 2 : 3].y - axisPoints[sharedOrigin.checked ? 0 : 2].y;
     const deltaValY = logY ? Math.log10(y2Val) - Math.log10(y1Val) : y2Val - y1Val;
     scaleY = deltaPixY / deltaValY;
-    offsetY = logY ? axisPoints[sharedOrigin.checked ? 1 : 2].y - Math.log10(y1Val) * scaleY : axisPoints[sharedOrigin.checked ? 1 : 2].y - y1Val * scaleY;
+    offsetY = logY ? axisPoints[sharedOrigin.checked ? 0 : 2].y - Math.log10(y1Val) * scaleY : axisPoints[sharedOrigin.checked ? 0 : 2].y - y1Val * scaleY;
     if (!isFinite(scaleY) || Math.abs(deltaPixY) < 1e-10 || Math.abs(deltaValY) < 1e-10) {
       showModal('Invalid Y-axis scale after toggling log mode.');
       console.error('Invalid scaleY:', scaleY);
