@@ -8,7 +8,7 @@ const magCtx = magnifier.getContext('2d');
 let img = new Image();
 let zoom = 1, panX = 0, panY = 0, isPanning = false, startPan = { x: 0, y: 0 };
 let axisPoints = [], isCalibrated = false, scaleX, scaleY, offsetX, offsetY;
-let lines = [{ name: 'Line 1', points: [] }], currentLineIndex = 0;
+let lines = [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }], currentLineIndex = 0;
 let mode = 'none'; // 'none', 'axes', 'add', 'adjust', 'delete', 'highlight'
 let selectedPointIndex = -1;
 let history = [], historyIndex = -1;
@@ -113,7 +113,19 @@ function loadSession() {
     try {
       const state = JSON.parse(s);
       console.log('Loaded session state:', state);
-      lines = state.lines || [{ name: 'Line 1', points: [] }];
+      lines = state.lines || [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }];
+      lines.forEach(line => {
+        if (typeof line.sorted === 'undefined') line.sorted = false;
+        if (typeof line.orderCounter === 'undefined') {
+          let max = 0;
+          line.points = line.points.map(p => {
+            if (typeof p.order === 'undefined') p.order = ++max;
+            else max = Math.max(max, p.order);
+            return p;
+          });
+          line.orderCounter = max + 1;
+        }
+      });
       axisPoints = state.axisPoints || [];
       scaleX = state.scaleX;
       scaleY = state.scaleY;
@@ -661,7 +673,7 @@ canvas.addEventListener('mousemove', e => {
   if (isDraggingPoint && mode === 'adjust') {
     if (!dataCoords) return;
     const { dataX, dataY } = dataCoords;
-    lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY };
+    lines[currentLineIndex].points[selectedPointIndex] = { x, y, dataX, dataY, order: lines[currentLineIndex].points[selectedPointIndex].order };
     console.log(`Adjusting point ${selectedPointIndex}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
     updatePreview();
     draw();
@@ -780,8 +792,9 @@ canvas.addEventListener('mousedown', e => {
       return;
     }
     const { dataX, dataY } = dataCoords;
-    lines[currentLineIndex].points.push({ x, y, dataX, dataY });
-    console.log(`Added point to Line ${currentLineIndex + 1}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
+    const line = lines[currentLineIndex];
+    line.points.push({ x, y, dataX, dataY, order: ++line.orderCounter });
+    console.log(`Added point to Line ${currentLineIndex + 1}: x=${x.toFixed(2)}, y=${y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}, order=${line.points[line.points.length - 1].order}`);
     updatePreview();
     draw();
     saveState();
@@ -847,7 +860,8 @@ canvas.addEventListener('mouseup', e => {
       lineName = `${lineName} (${suffix})`;
     }
     console.log(`Creating new line: ${lineName} with ${n} points`);
-    lines.push({ name: lineName, points: [] });
+    const newLine = { name: lineName, points: [], sorted: false, orderCounter: 0 };
+    lines.push(newLine);
     currentLineIndex = lines.length - 1;
     const spacedPoints = interpolatePoints(highlightPath, n);
     spacedPoints.forEach((p, i) => {
@@ -857,8 +871,8 @@ canvas.addEventListener('mouseup', e => {
         return;
       }
       const { dataX, dataY } = dataCoords;
-      lines[currentLineIndex].points.push({ x: p.x, y: p.y, dataX, dataY });
-      console.log(`Added highlight point ${i + 1}/${n}: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}`);
+      newLine.points.push({ x: p.x, y: p.y, dataX, dataY, order: ++newLine.orderCounter });
+      console.log(`Added highlight point ${i + 1}/${n}: x=${p.x.toFixed(2)}, y=${p.y.toFixed(2)}, dataX=${dataX.toFixed(15)}, dataY=${dataY.toFixed(15)}, order=${newLine.points[newLine.points.length - 1].order}`);
     });
     highlightPath = [];
     updateLineSelect();
@@ -873,7 +887,6 @@ document.getElementById('toggle-theme').onclick = () => {
   document.body.classList.toggle('dark');
   localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
 };
-
 /**********************
  * KEYBOARD SHORTCUTS
  **********************/
@@ -1133,7 +1146,7 @@ clearSessionBtn.addEventListener('click', () => {
     scaleX = scaleY = offsetX = offsetY = undefined;
     logX = false;
     logY = false;
-    lines = [{ name: 'Line 1', points: [] }];
+    lines = [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }];
     currentLineIndex = 0;
     highlightPath = [];
     isHighlighting = false;
@@ -1157,6 +1170,7 @@ clearSessionBtn.addEventListener('click', () => {
     undoBtn.disabled = true;
     redoBtn.disabled = true;
     highlightControls.style.display = 'none';
+    sortPointsBtn.classList.remove('sort-active');
     updateLineSelect();
     updatePreview();
     updateButtonStates();
@@ -1206,6 +1220,9 @@ deleteHighlightBtn.addEventListener('click', () => {
 
 clearPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points = [];
+  lines[currentLineIndex].orderCounter = 0;
+  lines[currentLineIndex].sorted = false;
+  sortPointsBtn.classList.remove('sort-active');
   console.log(`Cleared points for Line ${currentLineIndex + 1}`);
   updatePreview();
   draw();
@@ -1214,8 +1231,10 @@ clearPointsBtn.addEventListener('click', () => {
 });
 
 sortPointsBtn.addEventListener('click', () => {
-  lines[currentLineIndex].points.sort((a, b) => a.dataX - b.dataX);
-  console.log(`Sorted points for Line ${currentLineIndex + 1}`);
+  const line = lines[currentLineIndex];
+  line.sorted = !line.sorted;
+  sortPointsBtn.classList.toggle('sort-active', line.sorted);
+  console.log(`Toggled sorting for Line ${currentLineIndex + 1}: sorted=${line.sorted}`);
   updatePreview();
   draw();
   saveState();
@@ -1229,6 +1248,7 @@ function updateButtonStates() {
   highlightLineBtn.classList.toggle('active', mode === 'highlight');
   canvas.style.cursor = isPanning ? 'move' : (mode === 'highlight' || mode === 'axes') ? 'crosshair' : 'default';
   statusBar.textContent = `Mode: ${mode}`;
+  logModeChange(mode);
 }
 
 /**********************
@@ -1286,7 +1306,7 @@ newLineBtn.addEventListener('click', () => {
       showModal('Line name must be unique');
       return;
     }
-    lines.push({ name, points: [] });
+    lines.push({ name, points: [], sorted: false, orderCounter: 0 });
     currentLineIndex = lines.length - 1;
     updateLineSelect();
     updatePreview();
@@ -1317,6 +1337,7 @@ renameLineBtn.addEventListener('click', () => {
 lineSelect.addEventListener('change', () => {
   currentLineIndex = parseInt(lineSelect.value);
   console.log(`Switched to Line ${currentLineIndex + 1}: ${lines[currentLineIndex].name}`);
+  sortPointsBtn.classList.toggle('sort-active', lines[currentLineIndex].sorted);
   updatePreview();
   draw();
   saveSession();
@@ -1337,7 +1358,19 @@ importJsonInput.addEventListener('change', e => {
     reader.onload = ev => {
       try {
         const state = JSON.parse(ev.target.result);
-        lines = state.lines || [{ name: 'Line 1', points: [] }];
+        lines = state.lines || [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }];
+        lines.forEach(line => {
+          if (typeof line.sorted === 'undefined') line.sorted = false;
+          if (typeof line.orderCounter === 'undefined') {
+            let max = 0;
+            line.points = line.points.map(p => {
+              if (typeof p.order === 'undefined') p.order = ++max;
+              else max = Math.max(max, p.order);
+              return p;
+            });
+            line.orderCounter = max + 1;
+          }
+        });
         axisPoints = state.axisPoints || [];
         scaleX = state.scaleX;
         scaleY = state.scaleY;
@@ -1370,10 +1403,11 @@ importJsonInput.addEventListener('change', e => {
           deletePointBtn.disabled = false;
           highlightLineBtn.disabled = false;
           clearPointsBtn.disabled = false;
-          sortPointsBtn.disabled = true;
+          sortPointsBtn.disabled = false;
           newLineBtn.disabled = false;
           renameLineBtn.disabled = false;
         }
+        sortPointsBtn.classList.toggle('sort-active', lines[currentLineIndex].sorted);
         draw();
         saveState();
         saveSession();
@@ -1401,7 +1435,8 @@ exportCsvBtn.addEventListener('click', () => {
   lines.forEach(line => {
     csv += `"${line.name}",\n`;
     csv += 'X,Y\n';
-    line.points.forEach(p => {
+    const points = line.sorted ? [...line.points].sort((a, b) => a.dataX - b.dataX) : [...line.points].sort((a, b) => a.order - b.order);
+    points.forEach(p => {
       const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(15);
       const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(15);
       csv += `${dataX},${dataY}\n`;
@@ -1418,16 +1453,13 @@ exportXlsxBtn.addEventListener('click', () => {
     
     lines.forEach((line, index) => {
       if (line.points.length === 0) return;
-      // Add line name as a header
       allData.push([`${line.name}`]);
-      // Sort points by dataX and add to data
-      const sortedPoints = [...line.points].sort((a, b) => a.dataX - b.dataX);
-      sortedPoints.forEach(p => {
+      const points = line.sorted ? [...line.points].sort((a, b) => a.dataX - b.dataX) : [...line.points].sort((a, b) => a.order - b.order);
+      points.forEach(p => {
         const dataX = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15));
         const dataY = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15));
         allData.push([dataX, dataY]);
       });
-      // Add empty row after each line (except the last)
       if (index < lines.length - 1) {
         allData.push([]);
       }
@@ -1438,7 +1470,6 @@ exportXlsxBtn.addEventListener('click', () => {
       return;
     }
 
-    // Create a single worksheet
     const worksheet = XLSX.utils.aoa_to_sheet(allData);
     XLSX.utils.book_append_sheet(workbook, worksheet, 'All_Lines');
     XLSX.writeFile(workbook, 'graph.xlsx');
@@ -1481,8 +1512,8 @@ undoBtn.addEventListener('click', () => {
     mode = state.mode;
     currentLineIndex = state.currentLineIndex;
     magnifierZoom = state.magnifierZoom;
-    highlightPath = state.highlightPath || []; // Restore highlightPath
-    isHighlighting = state.isHighlighting || false; // Restore isHighlighting
+    highlightPath = state.highlightPath || [];
+    isHighlighting = state.isHighlighting || false;
     toggleLogXBtn.classList.toggle('log-active', logX);
     toggleLogYBtn.classList.toggle('log-active', logY);
     document.getElementById('magnifier-zoom').value = magnifierZoom;
@@ -1497,6 +1528,7 @@ undoBtn.addEventListener('click', () => {
       axisPoints.length < (sharedOrigin.checked ? 3 : 4) ?
       `Click point for ${sharedOrigin.checked && axisPoints.length === 0 ? 'Shared Origin (X1/Y1)' : axisLabels[axisPoints.length]} on the chart.` :
       'Enter axis values and click Calibrate.';
+    sortPointsBtn.classList.toggle('sort-active', lines[currentLineIndex].sorted);
     draw();
     saveSession();
     console.log('Undo complete:', { historyIndex, mode, linesLength: lines.length, axisPointsLength: axisPoints.length });
@@ -1526,8 +1558,8 @@ redoBtn.addEventListener('click', () => {
     mode = state.mode;
     currentLineIndex = state.currentLineIndex;
     magnifierZoom = state.magnifierZoom;
-    highlightPath = state.highlightPath || []; // Restore highlightPath
-    isHighlighting = state.isHighlighting || false; // Restore isHighlighting
+    highlightPath = state.highlightPath || [];
+    isHighlighting = state.isHighlighting || false;
     toggleLogXBtn.classList.toggle('log-active', logX);
     toggleLogYBtn.classList.toggle('log-active', logY);
     document.getElementById('magnifier-zoom').value = magnifierZoom;
@@ -1542,6 +1574,7 @@ redoBtn.addEventListener('click', () => {
       axisPoints.length < (sharedOrigin.checked ? 3 : 4) ?
       `Click point for ${sharedOrigin.checked && axisPoints.length === 0 ? 'Shared Origin (X1/Y1)' : axisLabels[axisPoints.length]} on the chart.` :
       'Enter axis values and click Calibrate.';
+    sortPointsBtn.classList.toggle('sort-active', lines[currentLineIndex].sorted);
     draw();
     saveSession();
     console.log('Redo complete:', { historyIndex, mode, linesLength: lines.length, axisPointsLength: axisPoints.length });
@@ -1596,13 +1629,13 @@ document.getElementById('magnifier-zoom').addEventListener('change', (e) => {
 // Update highlight width
 document.getElementById('highlight-width').addEventListener('input', (e) => {
   highlightWidth = parseFloat(e.target.value);
-  if (highlightWidth < 1) highlightWidth = 1; // Prevent invalid widths
+  if (highlightWidth < 1) highlightWidth = 1;
   console.log('Highlight width updated:', highlightWidth);
   saveSession();
   draw();
 });
 
-// Prevent context menu on canvas to avoid interfering with right-click actions
+// Prevent context menu on canvas
 canvas.addEventListener('contextmenu', e => {
   e.preventDefault();
 });
@@ -1622,15 +1655,4 @@ function logModeChange(newMode) {
     highlightPathLength: highlightPath.length,
     isHighlighting
   });
-}
-
-// Update button states with logging
-function updateButtonStates() {
-  addPointBtn.classList.toggle('active', mode === 'add');
-  adjustPointBtn.classList.toggle('active', mode === 'adjust');
-  deletePointBtn.classList.toggle('active', mode === 'delete');
-  highlightLineBtn.classList.toggle('active', mode === 'highlight');
-  canvas.style.cursor = isPanning ? 'move' : (mode === 'highlight' || mode === 'axes') ? 'crosshair' : 'default';
-  statusBar.textContent = `Mode: ${mode}`;
-  logModeChange(mode);
 }
