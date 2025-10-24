@@ -11,81 +11,7 @@ except FileNotFoundError:
     st.error("Missing styles.css")
     st.stop()
 
-# Load JS modules (we'll inline them in html_content)
-# Note: Streamlit cannot load ES modules directly, so we inline all JS
-
-js_modules = """
-<!-- digitizer.js (main entry) -->
-<script type="module">
-import { state } from './digitizer.js';
-import { initUI, bindButtons, updateButtonStates, updatePreview, updateLineSelect, setMode } 
-    from './modules/ui.js';
-import { initCanvas, draw, getCanvasCoords, flashCenter } 
-    from './modules/canvas.js';
-import { initCalibration, handleAxisClick, calibrate, resetCalibration, toggleLogX, toggleLogY } 
-    from './modules/calibration.js';
-import { initPoints, handlePointClick, startHighlight, moveHighlight, endHighlight, 
-         deleteHighlight, clearCurrentLine, sortCurrentLine } 
-    from './modules/points.js';
-import { initIO, exportJson, exportCsv, exportXlsx, importJson } 
-    from './modules/io.js';
-import { initHistory, saveState, undo, redo } 
-    from './modules/history.js';
-import { loadSession, saveSession } from './modules/session.js';
-import { initColorDetect, findLineCenter, hexToRgb, rgbToHex } 
-    from './modules/color-detect.js';
-import { debounce, showModal, showSpinner } from './modules/utils.js';
-
-// Global state
-window.state = {
-    canvas: null, ctx: null,
-    magnifier: null, magCtx: null,
-    img: new Image(),
-    zoom: 1, panX: 0, panY: 0,
-    isPanning: false, startPan: {x:0,y:0},
-    axisPoints: [], isCalibrated: false,
-    scaleX:0, scaleY:0, offsetX:0, offsetY:0,
-    lines: [{name:'Line 1', points:[], sorted:false, orderCounter:0}],
-    currentLineIndex: 0,
-    mode: 'none',
-    selectedPointIndex: -1,
-    showGrid: false,
-    logX: false, logY: false,
-    highlightPath: [], isHighlighting: false,
-    isDraggingPoint: false,
-    highlightWidth: 2,
-    magnifierZoom: 2,
-    autoCenter: false,
-    bgColor: {r:255,g:255,b:255},
-    lineColor: {r:0,g:0,b:0},
-    colorTolerance: 30,
-    searchRadius: 20,
-    history: [], historyIndex: -1
-};
-
-// DOMContentLoaded
-document.addEventListener('DOMContentLoaded', () => {
-    const s = window.state;
-    s.canvas = document.getElementById('canvas');
-    s.ctx = s.canvas.getContext('2d');
-    s.magnifier = document.getElementById('magnifier');
-    s.magCtx = s.magnifier.getContext('2d');
-
-    loadSession();
-    initUI();
-    initCanvas();
-    initCalibration();
-    initPoints();
-    initIO();
-    initHistory();
-    initColorDetect();
-    bindButtons();
-    draw();
-});
-</script>
-"""
-
-# Full HTML with embedded modules
+# HTML + Embedded JS
 html_content = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -101,11 +27,12 @@ html_content = f"""
     <div id="canvas-container">
       <canvas id="canvas"></canvas>
       <canvas id="magnifier" width="100" height="100"></canvas>
-      <div id="status-bar"></div>
+      <div id="status-bar">Ready</div>
     </div>
     <div id="controls">
       <h3>Graph Digitizer Pro</h3>
       <input type="file" id="image-upload" accept="image/*">
+
       <details open><summary>View</summary>
         <button id="zoom-in">Zoom In</button>
         <button id="zoom-out">Zoom Out</button>
@@ -137,7 +64,7 @@ html_content = f"""
         </div>
         <button id="reset-calibration">Reset Calibration</button>
         <button id="toggle-grid">Toggle Grid</button>
-        <button id="toggle-log-x">Toggle Log (X)</button>
+        <button id="toggle-log-x">Toggle Log (X)</button>
         <button id="toggle-log-y">Toggle Log (Y)</button>
       </details>
 
@@ -147,9 +74,7 @@ html_content = f"""
         <button id="delete-point">Delete Point</button>
         <button id="highlight-line" class="holographic">Highlight Line</button>
         <div id="highlight-controls" style="display:none;">
-          <p>Line Name: <input type="text" id="highlight-line-name" placeholder="Enter name"></p>
           <p>Points (n): <input type="number" id="n-points" value="5" min="1"></p>
-          <p>Brush Width: <input type="range" id="highlight-width" min="1" max="10" value="2"></p>
           <button id="delete-highlight">Delete Highlight</button>
         </div>
         <button id="clear-points">Clear Points</button>
@@ -172,7 +97,7 @@ html_content = f"""
       </details>
 
       <details><summary>Preview Data</summary>
-        <table id="preview-table"></table>
+        <table id="preview-table"><tr><td colspan="2">No data</td></tr></table>
       </details>
 
       <details open><summary>History</summary>
@@ -181,24 +106,16 @@ html_content = f"""
       </details>
     </div>
   </div>
+
   <div id="modal"><div id="modal-content"></div></div>
   <div id="spinner">Processing...</div>
 
-  <!-- Inline all JS modules -->
-  {js_modules}
-  <script type="module" src="./modules/ui.js"></script>
-  <script type="module" src="./modules/canvas.js"></script>
-  <script type="module" src="./modules/calibration.js"></script>
-  <script type="module" src="./modules/points.js"></script>
-  <script type="module" src="./modules/io.js"></script>
-  <script type="module" src="./modules/history.js"></script>
-  <script type="module" src="./modules/session.js"></script>
-  <script type="module" src="./modules/color-detect.js"></script>
-  <script type="module" src="./modules/utils.js"></script>
+  <!-- Main Module -->
+  <script type="module" src="./digitizer.js"></script>
 </body>
 </html>
 """
 
-st.title("Graph Digitizer Pro - Streamlit Edition")
-st.markdown("Upload a graph image, calibrate axes, digitize points, and export data.")
+st.title("Graph Digitizer Pro")
+st.markdown("Upload a graph image → calibrate → digitize → export data.")
 st.components.v1.html(html_content, height=900, scrolling=True)
