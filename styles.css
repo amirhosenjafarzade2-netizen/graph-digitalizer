@@ -1,0 +1,16 @@
+/* styles.css */
+#color-detection-controls p {
+  display: flex;
+  align-items: center;
+  margin: 6px 0;
+}
+#color-detection-controls input[type="color"] {
+  width: 40px;
+  height: 30px;
+  padding: 0;
+  margin-left: 8px;
+}
+#color-detection-controls input[type="number"] {
+  flex: 1;
+  margin-left: 8px;
+}
