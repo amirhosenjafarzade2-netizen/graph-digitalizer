@@ -123,7 +123,7 @@ function loadSession() {
             else max = Math.max(max, p.order);
             return p;
           });
-          line.orderCounter = max + 1;
+          line.orderCounter = max; // next point gets ++orderCounter = max+1, correct
         }
       });
       axisPoints = state.axisPoints || [];
@@ -634,12 +634,20 @@ canvas.addEventListener('mousemove', e => {
   statusBar.textContent = `Mode: ${mode} | Canvas Coords: (${x.toFixed(2)}, ${y.toFixed(2)}) | Data Coords: (${dataX.toFixed(2)}, ${dataY.toFixed(2)})`;
 
   if (mode === 'axes' && orthogonalAxes.checked) {
-    if (axisPoints.length === 1) {
-      y = axisPoints[0].y;
-    } else if (axisPoints.length === 2) {
-      x = axisPoints[0].x;
-    } else if (axisPoints.length === 3) {
-      x = axisPoints[2].x;
+    if (sharedOrigin.checked) {
+      if (axisPoints.length === 1) {
+        y = axisPoints[0].y; // X2: snap to origin's y (horizontal axis)
+      } else if (axisPoints.length === 2) {
+        x = axisPoints[0].x; // Y2: snap to origin's x (vertical axis)
+      }
+    } else {
+      if (axisPoints.length === 1) {
+        y = axisPoints[0].y; // X2: snap to X1's y (horizontal axis)
+      } else if (axisPoints.length === 2) {
+        // Y1: free point, no snap
+      } else if (axisPoints.length === 3) {
+        x = axisPoints[2].x; // Y2: snap to Y1's x (vertical axis)
+      }
     }
     dataCoords = isCalibrated ? canvasToDataCoords(x, y) : { dataX: x, dataY: y };
     dataX = dataCoords.dataX;
@@ -748,11 +756,11 @@ canvas.addEventListener('mousedown', e => {
         }
       } else {
         if (axisPoints.length === 1) {
-          y = axisPoints[0].y;
+          y = axisPoints[0].y; // X2: snap to X1's y (horizontal axis)
         } else if (axisPoints.length === 2) {
-          x = axisPoints[0].x;
+          // Y1: free point, no snap
         } else if (axisPoints.length === 3) {
-          x = axisPoints[2].x;
+          x = axisPoints[2].x; // Y2: snap to Y1's x (vertical axis)
         }
       }
     }
@@ -1368,7 +1376,7 @@ importJsonInput.addEventListener('change', e => {
               else max = Math.max(max, p.order);
               return p;
             });
-            line.orderCounter = max + 1;
+            line.orderCounter = max; // next point gets ++orderCounter = max+1, correct
           }
         });
         axisPoints = state.axisPoints || [];
