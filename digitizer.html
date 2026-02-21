@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Graph Digitizer Pro</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="container">
+    <div id="canvas-container">
+      <canvas id="canvas"></canvas>
+      <canvas id="magnifier" width="120" height="120"></canvas>
+      <div id="status-bar"></div>
+    </div>
+
+    <div id="controls" aria-label="Controls Panel">
+      <h3>Graph Digitizer Pro</h3>
+      <input type="file" id="image-upload" accept="image/*" title="Upload graph image">
+
+      <!-- VIEW -->
+      <details open>
+        <summary>View</summary>
+        <button id="zoom-in"      title="Zoom In (+)">Zoom In</button>
+        <button id="zoom-out"     title="Zoom Out (-)">Zoom Out</button>
+        <button id="reset-view"   title="Reset View (0)">Reset View</button>
+        <button id="pan-mode"     title="Toggle Pan Mode">Toggle Pan</button>
+        <button id="toggle-theme" title="Toggle Dark/Light Mode">Toggle Dark Mode</button>
+        <p>Magnifier Zoom:
+          <input type="range" id="magnifier-zoom" min="1" max="10" step="0.5" value="2" title="Magnifier zoom level">
+        </p>
+      </details>
+
+      <!-- IMAGE ENHANCEMENTS -->
+      <details open>
+        <summary>✨ Image Enhancements</summary>
+
+        <p class="slider-row">
+          <label>Brightness: <span id="brightness-val">100%</span></label>
+          <input type="range" id="brightness-slider" min="10" max="300" value="100" title="Adjust image brightness">
+        </p>
+
+        <p class="slider-row">
+          <label>Contrast: <span id="contrast-val">100%</span></label>
+          <input type="range" id="contrast-slider" min="10" max="400" value="100" title="Adjust image contrast">
+        </p>
+
+        <p class="checkbox-container">
+          <input type="checkbox" id="grid-filter-toggle" title="Attempt to suppress background grid lines using blend filter">
+          <label for="grid-filter-toggle">Grid Filter (suppress grids)</label>
+        </p>
+
+        <p class="checkbox-container">
+          <input type="checkbox" id="snap-toggle" title="Snap placed points to the nearest dark pixel (line) within a small radius">
+          <label for="snap-toggle">🧲 Snap to Dark Pixel (Magnet)</label>
+        </p>
+      </details>
+
+      <!-- CALIBRATION -->
+      <details open>
+        <summary>Calibration</summary>
+        <p id="axis-instruction">Click "Set Axis Points" then enter values.</p>
+        <button id="set-axes"          title="Start axis calibration">Set Axis Points</button>
+        <button id="reset-axis-points" title="Reset axis points">Reset Axis Points</button>
+        <div id="axis-inputs">
+          <p class="checkbox-container">
+            <input type="checkbox" id="shared-origin" title="Use same point for X1 and Y1">
+            <label for="shared-origin">Shared Origin (X1/Y1)</label>
+          </p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="orthogonal-axes" title="Enforce orthogonal axis snapping">
+            <label for="orthogonal-axes">Orthogonal Axes</label>
+          </p>
+          <!-- FIX #1: Use proper <label> elements so updateAxisLabels() can target them -->
+          <p><label for="x1-value">X1:</label> <input type="number" id="x1-value" step="any"></p>
+          <p><label for="x2-value">X2:</label> <input type="number" id="x2-value" step="any"></p>
+          <p><label for="y1-value">Y1:</label> <input type="number" id="y1-value" step="any"></p>
+          <p><label for="y2-value">Y2:</label> <input type="number" id="y2-value" step="any"></p>
+          <button id="calibrate" title="Apply calibration" disabled>Calibrate</button>
+        </div>
+        <button id="reset-calibration" title="Clear calibration">Reset Calibration</button>
+        <button id="toggle-grid"       title="Show/hide overlay grid">Toggle Grid</button>
+        <button id="toggle-log-x"      title="Toggle X-axis log scale">Toggle Log Scale (X)</button>
+        <button id="toggle-log-y"      title="Toggle Y-axis log scale">Toggle Log Scale (Y)</button>
+      </details>
+
+      <!-- POINT ACTIONS -->
+      <details open>
+        <summary>Point Actions</summary>
+        <button id="add-point"    title="Click canvas to add a point (P)" disabled>Add Point</button>
+        <button id="adjust-point" title="Drag a point to reposition it"   disabled>Adjust Point</button>
+        <button id="delete-point" title="Click a point to delete it"       disabled>Delete Point</button>
+
+        <button id="highlight-line" class="holographic" title="Hold left-click and drag to trace a curve (H)" disabled>
+          Highlight Line
+        </button>
+        <div id="highlight-controls">
+          <p>Line Name: <input type="text" id="highlight-line-name" placeholder="Enter line name"></p>
+          <p>Points (n): <input type="number" id="n-points" value="20" min="2"></p>
+          <p>Brush Width: <input type="range" id="highlight-width" min="1" max="20" value="3"></p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="auto-trace-toggle" checked
+              title="After tracing, detect line color from path and snap all points to nearest matching pixel — ignores grid lines">
+            <label for="auto-trace-toggle">🎯 Auto-Trace (color snap)</label>
+          </p>
+          <button id="delete-highlight" title="Clear the current highlight path">Delete Highlight</button>
+        </div>
+
+        <button id="clear-points" title="Clear all points in current line" disabled>Clear Points</button>
+        <button id="sort-points"  title="Sort points by X coordinate"      disabled>Sort Points (X)</button>
+      </details>
+
+      <!-- LINE MANAGEMENT -->
+      <details open>
+        <summary>Line Management</summary>
+        <button id="new-line"    title="Create a new data line" disabled>New Line</button>
+        <button id="rename-line" title="Rename the current line" disabled>Rename Line</button>
+        <select id="line-select" title="Select active line"></select>
+      </details>
+
+      <!-- DATA -->
+      <details open>
+        <summary>Data</summary>
+        <input type="file" id="import-json-input" accept=".json" style="display:none">
+        <button id="import-json"  title="Import JSON session">Import JSON</button>
+        <button id="export-json"  title="Export data as JSON">Export JSON</button>
+        <button id="export-csv"   title="Export data as CSV">Export CSV</button>
+        <button id="export-xlsx"  title="Export data as Excel">Export XLSX</button>
+        <button id="export-image" title="Export canvas as PNG">Export Image</button>
+        <button id="clear-session" title="Clear all data and calibration">Clear Session</button>
+      </details>
+
+      <!-- PREVIEW -->
+      <details>
+        <summary>Preview Data</summary>
+        <div style="max-height:200px;overflow-y:auto;">
+          <table id="preview-table"></table>
+        </div>
+      </details>
+
+      <!-- HISTORY -->
+      <details open>
+        <summary>History</summary>
+        <button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button id="redo" title="Redo (Ctrl+Y)" disabled>Redo</button>
+      </details>
+
+      <!-- POINT LIST -->
+      <details open>
+        <summary>Points (current line)</summary>
+        <div id="point-list"></div>
+      </details>
+    </div>
+  </div>
+
+  <div id="modal"><div id="modal-content"></div></div>
+  <div id="spinner">Processing…</div>
+
+  <!-- Core must load first: state, drawing, calibration, session -->
+  <script src="digitizer-core.js"></script>
+  <!-- Tools: interactions, auto-trace, snap, export -->
+  <script src="digitizer-tools.js"></script>
+</body>
+</html>
