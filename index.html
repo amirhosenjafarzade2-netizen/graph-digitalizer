@@ -12,6 +12,7 @@
     <div id="canvas-container">
       <canvas id="canvas"></canvas>
       <canvas id="magnifier" width="120" height="120"></canvas>
+      <div id="color-tip"><span class="swatch"></span><span class="tip-text"></span></div>
       <div id="status-bar"></div>
     </div>
 
@@ -52,9 +53,34 @@
         </p>
 
         <p class="checkbox-container">
-          <input type="checkbox" id="snap-toggle" title="Snap placed points to the nearest dark pixel (line) within a small radius">
-          <label for="snap-toggle">🧲 Snap to Dark Pixel (Magnet)</label>
+          <input type="checkbox" id="snap-toggle" title="Snap placed points to the nearest matching pixel (line) within a small radius">
+          <label for="snap-toggle">🧲 Snap to Pixel (Magnet)</label>
         </p>
+
+        <div id="snap-options">
+          <p class="inline-row">
+            <label for="snap-mode">Snap to:</label>
+            <select id="snap-mode" title="What the magnet should snap to">
+              <option value="dark">Dark pixels (default)</option>
+              <option value="custom">Chosen color</option>
+            </select>
+          </p>
+          <div id="snap-custom-options" style="display:none;">
+            <p class="inline-row">
+              <label for="snap-color">Color:</label>
+              <input type="color" id="snap-color" value="#ff0000" title="Click the square to choose the color to snap to">
+              <button id="snap-pick" title="Eyedropper: hover over the graph to preview a color, click to use it (Esc cancels)">🧪 Detect color</button>
+            </p>
+            <p class="inline-row" id="snap-live-row">
+              <span id="snap-live" class="swatch" title="Color under the pointer while detecting"></span>
+              <span id="snap-live-hex">Hover over the graph while detecting…</span>
+            </p>
+            <p class="slider-row">
+              <label>Tolerance: <span id="snap-tol-val">60</span></label>
+              <input type="range" id="snap-tol" min="5" max="200" value="60" title="Higher = accepts colors further from the chosen one">
+            </p>
+          </div>
+        </div>
       </details>
 
       <!-- CALIBRATION -->
