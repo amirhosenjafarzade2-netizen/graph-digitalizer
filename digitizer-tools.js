@@ -1,90 +1,142 @@
 /**********************
  * DIGITIZER TOOLS
- * Handles: mouse interactions, auto-trace, snap-to-line,
+ * Handles: mouse interactions, snap (dark OR chosen colour), auto-trace,
  *          point actions, line management, import/export
  *
  * Depends on: digitizer-core.js (must be loaded first)
  *
- * FIXES:
- *  7.  snapToDark called twice — removed redundant second snap after autoTrace
- *  8.  Status bar shows un-snapped coords in axis+orthogonal mode — compute
- *      display coords after snapping is applied
- *  9.  Double-modal on clear session — callback approach, no nested showModal
- *  10. importJsonInput not reset — value cleared after each import
- *  11. highlightLineName not cleared after highlight committed
- *  12. interpolatePoints division-by-zero when n<2 — hard guard added
+ * CHANGES IN THIS VERSION
+ *  - Everything works in image-pixel space (no window-size dependency).
+ *  - Snap can target dark pixels (default) or a user-chosen colour,
+ *    with tolerance and an on-image eyedropper (see core: snap-* controls).
+ *  - Snap / auto-trace search radius is defined in SCREEN pixels, so it stays
+ *    sensible at any zoom level.
+ *  - Mode buttons are real toggles: click an active mode again to switch it off.
+ *  - Pan also works with the middle mouse button at any time.
+ *  - Mouse-up is tracked on the window, so releasing outside the canvas
+ *    can no longer leave a drag or a highlight "stuck".
  **********************/
 
 /**********************
- * SNAP-TO-DARK-PIXEL (MAGNET)
+ * SNAP (MAGNET)
  **********************/
-const SNAP_RADIUS_CANVAS = 18;
+const SNAP_RADIUS_SCREEN = 18;   // px on screen
+const BAND_SCREEN        = 18;   // auto-trace perpendicular search band, px on screen
 
+/** Convert a screen-pixel distance into image pixels at the current zoom. */
+function screenToImgPx(px, min = 3, max = 40) {
+  return Math.min(max, Math.max(min, Math.round(px / zoom)));
+}
+
+/**
+ * Main entry point used by add / adjust / highlight / auto-trace.
+ * Respects the magnet toggle unless forceSnap is true.
+ * Target = darkest pixels, or pixels close to the chosen colour.
+ */
 function snapToDark(cx, cy, forceSnap = false) {
   if (!rawImageData || (!snapToLine && !forceSnap)) return { x: cx, y: cy };
+  return snapColorMode === 'custom'
+    ? snapToColor(cx, cy, hexToRgb(snapColor), snapTolerance)
+    : snapToDarkest(cx, cy);
+}
+
+function snapToDarkest(cx, cy) {
   const pixData = getPixelData();
-  const { ix, iy } = canvasToImageCoords(cx, cy);
-  const iw = pixData.width;
-  const ih = pixData.height;
-  const r  = Math.max(4, Math.round(SNAP_RADIUS_CANVAS * (iw / canvas.width)));
+  const iw = pixData.width, ih = pixData.height, d = pixData.data;
+  const ix = Math.floor(cx), iy = Math.floor(cy);
+  const r  = screenToImgPx(SNAP_RADIUS_SCREEN);
 
   let minLuma = 255;
   for (let dy = -r; dy <= r; dy++) {
     for (let dx = -r; dx <= r; dx++) {
       if (dx * dx + dy * dy > r * r) continue;
-      const px = Math.round(ix) + dx;
-      const py = Math.round(iy) + dy;
+      const px = ix + dx, py = iy + dy;
       if (px < 0 || py < 0 || px >= iw || py >= ih) continue;
-      const idx  = (py * iw + px) * 4;
-      const luma = 0.299 * pixData.data[idx] + 0.587 * pixData.data[idx+1] + 0.114 * pixData.data[idx+2];
+      const i = (py * iw + px) * 4;
+      const luma = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
       if (luma < minLuma) minLuma = luma;
     }
   }
-
   if (minLuma > 230) return { x: cx, y: cy };
 
-  let darkX = 0, darkY = 0, darkCount = 0;
+  let sx = 0, sy = 0, n = 0;
   const threshold = minLuma + 30;
   for (let dy = -r; dy <= r; dy++) {
     for (let dx = -r; dx <= r; dx++) {
       if (dx * dx + dy * dy > r * r) continue;
-      const px = Math.round(ix) + dx;
-      const py = Math.round(iy) + dy;
+      const px = ix + dx, py = iy + dy;
       if (px < 0 || py < 0 || px >= iw || py >= ih) continue;
-      const idx  = (py * iw + px) * 4;
-      const luma = 0.299 * pixData.data[idx] + 0.587 * pixData.data[idx+1] + 0.114 * pixData.data[idx+2];
-      if (luma <= threshold) { darkX += px; darkY += py; darkCount++; }
+      const i = (py * iw + px) * 4;
+      const luma = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      if (luma <= threshold) { sx += px; sy += py; n++; }
     }
   }
+  if (n === 0) return { x: cx, y: cy };
+  return { x: sx / n + 0.5, y: sy / n + 0.5 };
+}
 
-  if (darkCount === 0) return { x: cx, y: cy };
+/**
+ * Snap to the centroid of pixels whose colour is close to `target`.
+ * If nothing within `tol` (RGB distance) exists in the radius, the point stays put.
+ */
+function snapToColor(cx, cy, target, tol) {
+  const pixData = getPixelData();
+  const iw = pixData.width, ih = pixData.height, d = pixData.data;
+  const ix = Math.floor(cx), iy = Math.floor(cy);
+  const r  = screenToImgPx(SNAP_RADIUS_SCREEN);
 
-  return {
-    x: (darkX / darkCount) * (canvas.width  / iw),
-    y: (darkY / darkCount) * (canvas.height / ih)
+  const dist2 = i => {
+    const dr = d[i] - target.r, dg = d[i + 1] - target.g, db = d[i + 2] - target.b;
+    return dr * dr + dg * dg + db * db;
   };
+
+  let best = Infinity;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r) continue;
+      const px = ix + dx, py = iy + dy;
+      if (px < 0 || py < 0 || px >= iw || py >= ih) continue;
+      const i = (py * iw + px) * 4;
+      if (d[i + 3] < 10) continue;
+      const v = dist2(i);
+      if (v < best) best = v;
+    }
+  }
+  if (!isFinite(best) || Math.sqrt(best) > tol) return { x: cx, y: cy };
+
+  // Average everything that is about as good as the best match (and within tol)
+  const limit = Math.min(tol, Math.sqrt(best) + 25);
+  const limit2 = limit * limit;
+  let sx = 0, sy = 0, n = 0;
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r) continue;
+      const px = ix + dx, py = iy + dy;
+      if (px < 0 || py < 0 || px >= iw || py >= ih) continue;
+      const i = (py * iw + px) * 4;
+      if (d[i + 3] < 10) continue;
+      if (dist2(i) <= limit2) { sx += px; sy += py; n++; }
+    }
+  }
+  if (n === 0) return { x: cx, y: cy };
+  return { x: sx / n + 0.5, y: sy / n + 0.5 };
 }
 
 /**********************
  * AUTO-TRACE ENGINE
  **********************/
-
 function detectLineColor(pathPoints) {
   if (!rawImageData || pathPoints.length < 2) return null;
   const pixData = getPixelData();
-  const iw   = pixData.width;
-  const ih   = pixData.height;
+  const iw = pixData.width, ih = pixData.height;
   const step = Math.max(1, Math.floor(pathPoints.length / 300));
   const buckets = {};
 
   for (let i = 0; i < pathPoints.length; i += step) {
-    const { ix, iy } = canvasToImageCoords(pathPoints[i].x, pathPoints[i].y);
-    const px = Math.round(Math.max(0, Math.min(ix, iw - 1)));
-    const py = Math.round(Math.max(0, Math.min(iy, ih - 1)));
+    const px = Math.floor(Math.max(0, Math.min(pathPoints[i].x, iw - 1)));
+    const py = Math.floor(Math.max(0, Math.min(pathPoints[i].y, ih - 1)));
     const idx = (py * iw + px) * 4;
-    const r = pixData.data[idx];
-    const g = pixData.data[idx + 1];
-    const b = pixData.data[idx + 2];
+    const r = pixData.data[idx], g = pixData.data[idx + 1], b = pixData.data[idx + 2];
     const luma = 0.299 * r + 0.587 * g + 0.114 * b;
     if (luma > 220) continue;
     const key = `${r >> 5},${g >> 5},${b >> 5}`;
@@ -95,7 +147,6 @@ function detectLineColor(pathPoints) {
 
   const candidates = Object.values(buckets).sort((a, b) => b.count - a.count);
   if (!candidates.length) return null;
-
   const best = candidates[0];
   return {
     r: Math.round(best.rSum / best.count),
@@ -105,65 +156,47 @@ function detectLineColor(pathPoints) {
   };
 }
 
-function refinePerp(cx, cy, tx, ty, targetColor, bandPx) {
+function refinePerp(cx, cy, tx, ty, targetColor, band) {
   if (!rawImageData || !targetColor) return { x: cx, y: cy };
   const pixData = getPixelData();
-  const iw  = pixData.width;
-  const ih  = pixData.height;
-  const { ix, iy } = canvasToImageCoords(cx, cy);
+  const iw = pixData.width, ih = pixData.height;
 
   const len = Math.hypot(tx, ty) || 1;
-  const px_dir = -ty / len;
-  const py_dir =  tx / len;
-
-  const imgBand = Math.max(3, Math.round(bandPx * (iw / canvas.width)));
+  const pxDir = -ty / len, pyDir = tx / len;
   const tol = 55;
-
   let sumX = 0, sumY = 0, count = 0;
 
-  for (let s = -imgBand; s <= imgBand; s++) {
-    const sx = Math.round(ix + px_dir * s);
-    const sy = Math.round(iy + py_dir * s);
+  for (let s = -band; s <= band; s++) {
+    const sx = Math.floor(cx + pxDir * s);
+    const sy = Math.floor(cy + pyDir * s);
     if (sx < 0 || sy < 0 || sx >= iw || sy >= ih) continue;
     const idx = (sy * iw + sx) * 4;
-    const dr  = pixData.data[idx]     - targetColor.r;
-    const dg  = pixData.data[idx + 1] - targetColor.g;
-    const db  = pixData.data[idx + 2] - targetColor.b;
-    const dist = Math.sqrt(dr*dr + dg*dg + db*db);
-    if (dist < tol) { sumX += sx; sumY += sy; count++; }
+    const dr = pixData.data[idx]     - targetColor.r;
+    const dg = pixData.data[idx + 1] - targetColor.g;
+    const db = pixData.data[idx + 2] - targetColor.b;
+    if (Math.sqrt(dr * dr + dg * dg + db * db) < tol) { sumX += sx; sumY += sy; count++; }
   }
-
   if (count === 0) return { x: cx, y: cy };
-  return {
-    x: (sumX / count) * (canvas.width  / iw),
-    y: (sumY / count) * (canvas.height / ih)
-  };
+  return { x: sumX / count + 0.5, y: sumY / count + 0.5 };
 }
 
 /**
- * FIX #7: autoTrace no longer applies a second snapToDark internally.
- * The single snap pass (forceSnap=true) here is the canonical one.
- * The caller (mouseup handler) must NOT snap again afterwards.
+ * Single refinement pass: colour-detect along the path, refine perpendicular,
+ * then one snap pass (forceSnap) using the current snap target.
  */
 function autoTrace(pathPoints, n) {
   showSpinner(true);
   const lineColor = detectLineColor(pathPoints);
   const spaced    = interpolatePoints(pathPoints, n);
-  const BAND_CANVAS = 18;
+  const band      = screenToImgPx(BAND_SCREEN);
 
   const refined = spaced.map((p, i) => {
     const prev = spaced[Math.max(0, i - 1)];
     const next = spaced[Math.min(spaced.length - 1, i + 1)];
-    const tx   = next.x - prev.x;
-    const ty   = next.y - prev.y;
-
     let pt = lineColor
-      ? refinePerp(p.x, p.y, tx, ty, lineColor, BAND_CANVAS)
+      ? refinePerp(p.x, p.y, next.x - prev.x, next.y - prev.y, lineColor, band)
       : { x: p.x, y: p.y };
-
-    // Single snap pass — forceSnap so it always runs regardless of toggle
-    pt = snapToDark(pt.x, pt.y, true);
-    return pt;
+    return snapToDark(pt.x, pt.y, true);
   });
 
   showSpinner(false);
@@ -173,12 +206,8 @@ function autoTrace(pathPoints, n) {
 /**********************
  * POINT INTERPOLATION
  **********************/
-
-/**
- * FIX #12: Guard n < 2 to prevent division by zero (segLen = total / (n-1)).
- */
 function interpolatePoints(points, n) {
-  if (n < 2) n = 2; // safety clamp
+  if (n < 2) n = 2;
   if (points.length < 2) return points.slice(0, n);
   const result = [];
   const totalLength = points.reduce((sum, p, i) => {
@@ -188,13 +217,14 @@ function interpolatePoints(points, n) {
   if (totalLength === 0) return [points[0]];
 
   const segLen = totalLength / (n - 1);
-  let   accLen = 0;
+  let accLen = 0;
   result.push(points[0]);
 
   for (let i = 1; i < points.length && result.length < n; i++) {
     const dx  = points[i].x - points[i - 1].x;
     const dy  = points[i].y - points[i - 1].y;
     const seg = Math.hypot(dx, dy);
+    if (seg === 0) continue;
     accLen += seg;
     while (result.length < n && accLen >= segLen * result.length) {
       const t = (segLen * result.length - (accLen - seg)) / seg;
@@ -207,17 +237,7 @@ function interpolatePoints(points, n) {
 /**********************
  * CANVAS MOUSE EVENTS
  **********************/
-canvas.addEventListener('mousedown', e => {
-  if (isPanning && e.buttons === 1) {
-    isPanDragging = true;
-    startPan.x = e.clientX - panX;
-    startPan.y = e.clientY - panY;
-    return;
-  }
-
-  let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
-
-  // Apply orthogonal snapping for axis mode
+function applyOrthogonal(x, y) {
   if (mode === 'axes' && orthogonalAxes.checked && axisPoints.length > 0) {
     if (sharedOrigin.checked) {
       if (axisPoints.length === 1) y = axisPoints[0].y;
@@ -227,6 +247,39 @@ canvas.addEventListener('mousedown', e => {
       else if (axisPoints.length === 3) x = axisPoints[2].x;
     }
   }
+  return { x, y };
+}
+
+canvas.addEventListener('mousedown', e => {
+  // Pan: pan-mode + left button, or middle button any time
+  if ((isPanning && e.button === 0) || e.button === 1) {
+    e.preventDefault();
+    isPanDragging = true;
+    startPan.x = e.clientX - panX;
+    startPan.y = e.clientY - panY;
+    magnifier.style.display = 'none';
+    updateButtonStates();
+    return;
+  }
+
+  let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
+
+  // Eyedropper for the snap colour
+  if (pickingSnapColor && e.button === 0 && rawImageData) {
+    const pd = getPixelData();
+    const px = Math.floor(Math.max(0, Math.min(x, pd.width  - 1)));
+    const py = Math.floor(Math.max(0, Math.min(y, pd.height - 1)));
+    const i  = (py * pd.width + px) * 4;
+    snapColor     = rgbToHex(pd.data[i], pd.data[i + 1], pd.data[i + 2]);
+    snapColorMode = 'custom';
+    snapToLine    = true;
+    setPickingSnapColor(false);
+    statusBar.textContent = `Snap colour set to ${snapColor.toUpperCase()}`;
+    saveSession();
+    return;
+  }
+
+  ({ x, y } = applyOrthogonal(x, y));
 
   if (e.button === 0 && mode === 'axes') {
     if (sharedOrigin.checked && axisPoints.length === 0) {
@@ -238,39 +291,36 @@ canvas.addEventListener('mousedown', e => {
     } else if (sharedOrigin.checked && axisPoints.length === 2) {
       axisPoints.push({ x, y, label: 'Y2' });
       axisInstruction.textContent = 'Enter axis values and click Calibrate.';
-      calibrateBtn.disabled = false;
     } else if (!sharedOrigin.checked && axisPoints.length < 4) {
       axisPoints.push({ x, y, label: axisLabels[axisPoints.length] });
-      if (axisPoints.length < 4) {
-        axisInstruction.textContent = `Click point for ${axisLabels[axisPoints.length]} on the chart.`;
-      } else {
-        axisInstruction.textContent = 'Enter axis values and click Calibrate.';
-        calibrateBtn.disabled = false;
-      }
+      axisInstruction.textContent = axisPoints.length < 4
+        ? `Click point for ${axisLabels[axisPoints.length]} on the chart.`
+        : 'Enter axis values and click Calibrate.';
     }
     axisInputs.style.display = 'block';
     updateAxisLabels();
     calibrateBtn.disabled = axisPoints.length !== (sharedOrigin.checked ? 3 : 4);
-    draw(); saveState(); saveSession();
+    draw(); saveState();
 
   } else if (e.button === 0 && mode === 'add' && isCalibrated) {
-    const snapped   = snapToDark(x, y, false);
-    const dataCoords= canvasToDataCoords(snapped.x, snapped.y);
+    const snapped    = snapToDark(x, y, false);
+    const dataCoords = canvasToDataCoords(snapped.x, snapped.y);
     if (!dataCoords) return;
     const line = lines[currentLineIndex];
     line.points.push({ x: snapped.x, y: snapped.y, dataX: dataCoords.dataX, dataY: dataCoords.dataY, order: ++line.orderCounter });
-    updatePreview(); draw(); saveState(); saveSession();
+    updatePreview(); draw(); saveState();
 
   } else if (e.button === 0 && mode === 'delete' && isCalibrated) {
     const index = findNearestPointIndex(x, y);
     if (index !== -1) {
       lines[currentLineIndex].points.splice(index, 1);
-      updatePreview(); draw(); saveState(); saveSession();
+      updatePreview(); draw(); saveState();
     }
 
   } else if (e.button === 0 && mode === 'adjust' && isCalibrated) {
     selectedPointIndex = findNearestPointIndex(x, y);
     if (selectedPointIndex !== -1) isDraggingPoint = true;
+    draw();
 
   } else if (e.button === 0 && mode === 'highlight' && isCalibrated && !isHighlighting) {
     isHighlighting = true;
@@ -280,66 +330,60 @@ canvas.addEventListener('mousedown', e => {
 });
 
 canvas.addEventListener('mousemove', e => {
+  if (isPanDragging) return;   // core handles panning
+
   let { x, y } = imageToCanvasCoords(e.clientX, e.clientY);
+  ({ x, y } = applyOrthogonal(x, y));
 
-  // FIX #8: Apply orthogonal snap BEFORE computing display coordinates so
-  // the status bar always reflects the snapped position in axis mode.
-  if (mode === 'axes' && orthogonalAxes.checked && axisPoints.length > 0) {
-    if (sharedOrigin.checked) {
-      if (axisPoints.length === 1) y = axisPoints[0].y;
-      else if (axisPoints.length === 2) x = axisPoints[0].x;
-    } else {
-      if (axisPoints.length === 1) y = axisPoints[0].y;
-      else if (axisPoints.length === 3) x = axisPoints[2].x;
-    }
-  }
+  const dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
+  const modeLabel  = isPanning ? 'pan' : mode;
+  statusBar.textContent = dataCoords
+    ? `Mode: ${modeLabel} | Image px: (${x.toFixed(1)}, ${y.toFixed(1)}) | Data: (${dataCoords.dataX.toFixed(4)}, ${dataCoords.dataY.toFixed(4)})`
+    : `Mode: ${modeLabel} | Image px: (${x.toFixed(1)}, ${y.toFixed(1)})`;
 
-  let dataCoords = isCalibrated ? canvasToDataCoords(x, y) : null;
-  if (dataCoords) {
-    statusBar.textContent = `Mode: ${mode} | Canvas: (${x.toFixed(1)}, ${y.toFixed(1)}) | Data: (${dataCoords.dataX.toFixed(4)}, ${dataCoords.dataY.toFixed(4)})`;
-  } else {
-    statusBar.textContent = `Mode: ${mode} | Canvas: (${x.toFixed(1)}, ${y.toFixed(1)})`;
-  }
+  if (pickingSnapColor) updateColorPreview(e.clientX, e.clientY, x, y);
 
-  if (['axes', 'add', 'adjust', 'delete', 'highlight'].includes(mode)) {
+  if (pickingSnapColor || ['axes', 'add', 'adjust', 'delete', 'highlight'].includes(mode)) {
     drawMagnifier(e.clientX, e.clientY);
   }
 
-  if (isDraggingPoint && mode === 'adjust') {
-    const snapped    = snapToDark(x, y, false);
-    const dc         = canvasToDataCoords(snapped.x, snapped.y);
+  if (isDraggingPoint && mode === 'adjust' && selectedPointIndex !== -1) {
+    const snapped = snapToDark(x, y, false);
+    const dc      = canvasToDataCoords(snapped.x, snapped.y);
     if (!dc) return;
+    const old = lines[currentLineIndex].points[selectedPointIndex];
     lines[currentLineIndex].points[selectedPointIndex] = {
-      x: snapped.x, y: snapped.y, dataX: dc.dataX, dataY: dc.dataY,
-      order: lines[currentLineIndex].points[selectedPointIndex].order
+      x: snapped.x, y: snapped.y, dataX: dc.dataX, dataY: dc.dataY, order: old.order
     };
     updatePreview(); draw();
   }
 
   if (isHighlighting && mode === 'highlight') {
     const last = highlightPath[highlightPath.length - 1];
-    if (!last || Math.hypot(x - last.x, y - last.y) > 5 / zoom) {
+    if (!last || Math.hypot(x - last.x, y - last.y) > 3 / zoom) {
       highlightPath.push({ x, y });
       draw();
     }
   }
 });
 
-canvas.addEventListener('mouseup', e => {
-  if (e.button === 0 && mode === 'adjust' && isDraggingPoint) {
+// Window-level mouseup: releasing outside the canvas can't leave things stuck.
+window.addEventListener('mouseup', e => {
+  if (e.button !== 0) return;
+
+  if (mode === 'adjust' && isDraggingPoint) {
     isDraggingPoint    = false;
     selectedPointIndex = -1;
-    saveState(); saveSession();
+    draw(); saveState();
 
-  } else if (e.button === 0 && mode === 'highlight' && isHighlighting) {
+  } else if (mode === 'highlight' && isHighlighting) {
     isHighlighting = false;
     if (highlightPath.length < 2) {
       showModal('Highlight path is too short.');
       highlightPath = []; draw(); return;
     }
 
-    // FIX #12: Validate n >= 2 before using
-    let n = parseInt(nPointsInput.value);
+    const n = parseInt(nPointsInput.value);
     if (isNaN(n) || n < 2) {
       showModal('Number of points (n) must be at least 2.');
       highlightPath = []; draw(); return;
@@ -347,7 +391,7 @@ canvas.addEventListener('mouseup', e => {
 
     const useAutoTrace = autoTraceCheckbox && autoTraceCheckbox.checked;
 
-    let lineName = (highlightLineName.value.trim()) || `Highlighted Line ${lines.length + 1}`;
+    let lineName = highlightLineName.value.trim() || `Highlighted Line ${lines.length + 1}`;
     let suffix = 1;
     const baseName = lineName;
     while (lines.some(l => l.name === lineName)) { lineName = `${baseName} (${suffix++})`; }
@@ -356,33 +400,25 @@ canvas.addEventListener('mouseup', e => {
     lines.push(newLine);
     currentLineIndex = lines.length - 1;
 
-    let candidates;
     if (useAutoTrace && rawImageData) {
-      // FIX #7: autoTrace already applies forceSnap internally.
-      // Do NOT call snapToDark again on the returned points.
       const { refined, lineColor } = autoTrace(highlightPath, n);
-      candidates = refined;
       const colorDesc = lineColor ? `RGB(${lineColor.r},${lineColor.g},${lineColor.b})` : 'unknown';
-      statusBar.textContent = `Auto-trace: ${candidates.length} pts — detected line color ${colorDesc}`;
-
-      candidates.forEach(p => {
+      statusBar.textContent = `Auto-trace: ${refined.length} pts — detected line color ${colorDesc}`;
+      refined.forEach(p => {
         const dc = canvasToDataCoords(p.x, p.y);
         if (dc) newLine.points.push({ x: p.x, y: p.y, dataX: dc.dataX, dataY: dc.dataY, order: ++newLine.orderCounter });
       });
     } else {
-      // Non-auto-trace path: interpolate then apply snap toggle normally
-      candidates = interpolatePoints(highlightPath, n);
-      candidates.forEach(p => {
-        const snapped = snapToDark(p.x, p.y, false); // respects snapToLine toggle
+      interpolatePoints(highlightPath, n).forEach(p => {
+        const snapped = snapToDark(p.x, p.y, false); // respects magnet toggle
         const dc = canvasToDataCoords(snapped.x, snapped.y);
         if (dc) newLine.points.push({ x: snapped.x, y: snapped.y, dataX: dc.dataX, dataY: dc.dataY, order: ++newLine.orderCounter });
       });
     }
 
     highlightPath = [];
-    // FIX #11: Clear the line name input so the next highlight starts fresh
     highlightLineName.value = '';
-    updateLineSelect(); updatePreview(); draw(); saveState(); saveSession();
+    updateLineSelect(); updatePreview(); updateButtonStates(); draw(); saveState();
   }
 });
 
@@ -404,51 +440,40 @@ imageUpload.addEventListener('change', e => {
 });
 
 /**********************
- * POINT ACTIONS
+ * POINT ACTIONS  (mode buttons are toggles)
  **********************/
-addPointBtn.addEventListener('click', () => {
-  mode = 'add';
-  highlightControls.style.display = 'none';
+function toggleMode(m) {
+  mode = (mode === m) ? 'none' : m;       // click again = switch off
+  setPickingSnapColor(false);
+  if (mode !== 'highlight') { isHighlighting = false; }
+  highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
+  if (mode === 'highlight') axisInputs.style.display = 'none';
+  if (mode === 'none') magnifier.style.display = 'none';
   updateButtonStates();
-});
+  saveSession();
+}
 
-adjustPointBtn.addEventListener('click', () => {
-  mode = 'adjust';
-  highlightControls.style.display = 'none';
-  updateButtonStates();
-});
-
-deletePointBtn.addEventListener('click', () => {
-  mode = 'delete';
-  highlightControls.style.display = 'none';
-  updateButtonStates();
-});
-
-highlightLineBtn.addEventListener('click', () => {
-  mode = 'highlight';
-  highlightControls.style.display = 'block';
-  axisInputs.style.display        = 'none';
-  updateButtonStates();
-});
+addPointBtn.addEventListener('click',      () => toggleMode('add'));
+adjustPointBtn.addEventListener('click',   () => toggleMode('adjust'));
+deletePointBtn.addEventListener('click',   () => toggleMode('delete'));
+highlightLineBtn.addEventListener('click', () => toggleMode('highlight'));
 
 deleteHighlightBtn.addEventListener('click', () => {
   highlightPath = [];
-  draw(); saveState(); saveSession();
+  draw(); saveState();
 });
 
 clearPointsBtn.addEventListener('click', () => {
   lines[currentLineIndex].points       = [];
   lines[currentLineIndex].orderCounter = 0;
   lines[currentLineIndex].sorted       = false;
-  sortPointsBtn.classList.remove('sort-active');
-  updatePreview(); draw(); saveState(); saveSession();
+  updatePreview(); updateButtonStates(); draw(); saveState();
 });
 
 sortPointsBtn.addEventListener('click', () => {
   const line = lines[currentLineIndex];
   line.sorted = !line.sorted;
-  sortPointsBtn.classList.toggle('sort-active', line.sorted);
-  updatePreview(); draw(); saveState(); saveSession();
+  updatePreview(); updateButtonStates(); draw(); saveState();
 });
 
 /**********************
@@ -460,7 +485,7 @@ newLineBtn.addEventListener('click', () => {
     if (lines.some(l => l.name === name)) { showModal('Line name must be unique'); return; }
     lines.push({ name, points: [], sorted: false, orderCounter: 0 });
     currentLineIndex = lines.length - 1;
-    updateLineSelect(); updatePreview(); draw(); saveState(); saveSession();
+    updateLineSelect(); updatePreview(); updateButtonStates(); draw(); saveState();
   });
 });
 
@@ -471,24 +496,23 @@ renameLineBtn.addEventListener('click', () => {
       showModal('Line name must be unique'); return;
     }
     lines[currentLineIndex].name = name;
-    updateLineSelect(); updatePreview(); saveState(); saveSession();
+    updateLineSelect(); updatePreview(); saveState();
   });
 });
 
 lineSelect.addEventListener('change', () => {
   currentLineIndex = parseInt(lineSelect.value);
-  sortPointsBtn.classList.toggle('sort-active', lines[currentLineIndex].sorted);
-  updatePreview(); draw(); saveSession();
+  updatePreview(); updateButtonStates(); draw(); saveSession();
 });
 
 /**********************
  * CLEAR / TOTAL RESET
  **********************/
 function performFullReset() {
-  img.src = '';
+  img = new Image();
   rawImageData = null;
   processedImageData = null;
-  canvas.width = canvas.height = 0;
+  enhancedCanvas.width = enhancedCanvas.height = 1;
   axisPoints   = [];
   isCalibrated = false;
   scaleX = scaleY = offsetX = offsetY = undefined;
@@ -503,29 +527,28 @@ function performFullReset() {
   magnifierZoom    = 2;
   brightnessVal    = 100; contrastVal = 100;
   snapToLine       = false; gridFilterOn = false;
-  toggleLogXBtn.classList.remove('log-active');
-  toggleLogYBtn.classList.remove('log-active');
-  axisInputs.style.display       = 'none';
-  highlightControls.style.display= 'none';
-  axisInstruction.textContent    = 'Click "Set Axis Points" then enter values.';
+  snapColorMode    = 'dark'; snapColor = '#ff0000'; snapTolerance = 60; pickingSnapColor = false; hideColorTip();
+  isPanning        = false; isPanDragging = false;
+  zoom = 1; panX = 0; panY = 0;
+  axisInputs.style.display        = 'none';
+  highlightControls.style.display = 'none';
+  magnifier.style.display         = 'none';
+  axisInstruction.textContent     = 'Click "Set Axis Points" then enter values.';
   brightnessSlider.value = 100; contrastSlider.value = 100;
   document.getElementById('brightness-val').textContent = '100%';
   document.getElementById('contrast-val').textContent   = '100%';
-  snapToggle.checked = false; gridFilterToggle.checked = false;
+  document.getElementById('magnifier-zoom').value = 2;
+  gridFilterToggle.checked = false;
   highlightLineName.value = '';
+  syncSnapUI();
   _applyCalibrationButtonState();
   undoBtn.disabled = redoBtn.disabled = true;
-  sortPointsBtn.classList.remove('sort-active');
-  updateLineSelect(); updatePreview(); updateButtonStates();
+  if (pointList) pointList.innerHTML = '';   // explicit: sidebar list must be empty
+  updateLineSelect(); updatePreview(); updatePointList(); updateButtonStates();
   localStorage.removeItem('digitizerState');
-  draw();
+  render();
 }
 
-/**
- * FIX #9: Avoid double-modal — confirmation modal calls performFullReset
- * directly in its OK callback and does not call showModal again.
- * A brief status bar update confirms the action without a second modal.
- */
 clearSessionBtn.addEventListener('click', () => {
   showModal('Clear all calibration and data? This cannot be undone.', false, () => {
     performFullReset();
@@ -534,14 +557,20 @@ clearSessionBtn.addEventListener('click', () => {
 });
 
 /**********************
- * EXPORT IMAGE
+ * EXPORT IMAGE  (full-resolution image + points, independent of the view)
  **********************/
 if (exportImageBtn) {
   exportImageBtn.addEventListener('click', () => {
-    if (!img.src || !img.complete) { showModal('No image loaded.'); return; }
-    const a   = document.createElement('a');
-    a.href    = canvas.toDataURL('image/png');
-    a.download= 'digitized_graph.png';
+    if (!hasImage()) { showModal('No image loaded.'); return; }
+    const out = document.createElement('canvas');
+    out.width = imgW(); out.height = imgH();
+    const c = out.getContext('2d');
+    c.drawImage(enhancedCanvas, 0, 0);
+    const z = Math.min(1, 1200 / Math.max(out.width, out.height)); // marker size scales with image size
+    drawOverlays(c, z, out.width, out.height);
+    const a = document.createElement('a');
+    a.href = out.toDataURL('image/png');
+    a.download = 'digitized_graph.png';
     a.click();
   });
 }
@@ -554,53 +583,42 @@ importJsonBtn.addEventListener('click', () => importJsonInput.click());
 importJsonInput.addEventListener('change', e => {
   showSpinner(true);
   const file = e.target.files[0];
-  // FIX #10: Reset value immediately so the same file can be re-imported
-  e.target.value = '';
+  e.target.value = '';   // allow re-importing the same file
   if (!file) { showModal('No file selected.'); showSpinner(false); return; }
   const reader = new FileReader();
   reader.onload = ev => {
     try {
       const state = JSON.parse(ev.target.result);
-      lines    = state.lines    || [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }];
-      lines.forEach(line => {
-        if (typeof line.sorted === 'undefined') line.sorted = false;
-        if (typeof line.orderCounter === 'undefined') {
-          let max = 0;
-          line.points = line.points.map(p => {
-            if (typeof p.order === 'undefined') p.order = ++max;
-            else max = Math.max(max, p.order);
-            return p;
-          });
-          line.orderCounter = max;
-        }
-      });
-      axisPoints      = state.axisPoints  || [];
-      scaleX          = state.scaleX;
-      scaleY          = state.scaleY;
-      offsetX         = state.offsetX;
-      offsetY         = state.offsetY;
-      logX            = state.logX        || false;
-      logY            = state.logY        || false;
-      isCalibrated    = state.isCalibrated|| false;
-      zoom            = state.zoom        || 1;
-      panX            = state.panX        || 0;
-      panY            = state.panY        || 0;
-      showGrid        = state.showGrid    || false;
-      mode            = state.mode        || 'none';
-      currentLineIndex= state.currentLineIndex || 0;
-      magnifierZoom   = state.magnifierZoom    || 2;
+      lines = state.lines || [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }];
+      normalizeLines();
+      axisPoints       = state.axisPoints   || [];
+      scaleX           = state.scaleX;
+      scaleY           = state.scaleY;
+      offsetX          = state.offsetX;
+      offsetY          = state.offsetY;
+      logX             = state.logX         || false;
+      logY             = state.logY         || false;
+      isCalibrated     = state.isCalibrated || false;
+      showGrid         = state.showGrid     || false;
+      mode             = state.mode         || 'none';
+      currentLineIndex = Math.min(state.currentLineIndex || 0, lines.length - 1);
+      magnifierZoom    = state.magnifierZoom || 2;
+      if (!isCalibrated && ['add', 'adjust', 'delete', 'highlight'].includes(mode)) mode = 'none';
+      // View (zoom/pan) is intentionally NOT imported – keep the current fitted view.
       history = []; historyIndex = -1;
-      updateLineSelect(); updatePreview(); updateButtonStates();
-      toggleLogXBtn.classList.toggle('log-active', logX);
-      toggleLogYBtn.classList.toggle('log-active', logY);
+      updateLineSelect(); updatePreview();
       document.getElementById('magnifier-zoom').value = magnifierZoom;
       highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
       axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
+      axisInstruction.textContent = isCalibrated
+        ? 'Calibration complete. Select a mode to digitize.'
+        : 'Click "Set Axis Points" then enter values.';
       _applyCalibrationButtonState();
-      sortPointsBtn.classList.toggle('sort-active', lines[currentLineIndex].sorted);
-      draw(); saveState(); saveSession();
+      updateButtonStates();
+      draw(); saveState();
       showSpinner(false);
       showModal('JSON imported successfully.');
+      warnIfLegacy(state);
     } catch (err) {
       showModal('Invalid JSON file.'); console.error(err); showSpinner(false);
     }
@@ -610,8 +628,9 @@ importJsonInput.addEventListener('change', e => {
 
 exportJsonBtn.addEventListener('click', () => {
   download('graph.json', JSON.stringify({
+    coordSpace: COORD_SPACE,
     lines, axisPoints, scaleX, scaleY, offsetX, offsetY,
-    logX, logY, isCalibrated, zoom, panX, panY,
+    logX, logY, isCalibrated,
     showGrid, mode, currentLineIndex, magnifierZoom
   }), 'application/json');
 });
@@ -622,9 +641,9 @@ exportCsvBtn.addEventListener('click', () => {
     csv += `"${line.name}"\nX,Y\n`;
     const pts = line.sorted
       ? [...line.points].sort((a, b) => a.dataX - b.dataX)
-      : [...line.points].sort((a, b) => a.order  - b.order);
+      : [...line.points].sort((a, b) => a.order - b.order);
     pts.forEach(p => {
-      csv += `${isNaN(p.dataX)||!isFinite(p.dataX)?'NaN':p.dataX.toFixed(15)},${isNaN(p.dataY)||!isFinite(p.dataY)?'NaN':p.dataY.toFixed(15)}\n`;
+      csv += `${isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(15)},${isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(15)}\n`;
     });
     csv += '\n';
   });
@@ -641,11 +660,11 @@ exportXlsxBtn.addEventListener('click', () => {
       all.push(['X', 'Y']);
       const pts = line.sorted
         ? [...line.points].sort((a, b) => a.dataX - b.dataX)
-        : [...line.points].sort((a, b) => a.order  - b.order);
+        : [...line.points].sort((a, b) => a.order - b.order);
       pts.forEach(p => {
         all.push([
-          isNaN(p.dataX)||!isFinite(p.dataX)?'NaN':Number(p.dataX.toFixed(15)),
-          isNaN(p.dataY)||!isFinite(p.dataY)?'NaN':Number(p.dataY.toFixed(15))
+          isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : Number(p.dataX.toFixed(15)),
+          isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : Number(p.dataY.toFixed(15))
         ]);
       });
       if (idx < lines.length - 1) all.push([]);
