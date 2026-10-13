@@ -22,16 +22,20 @@ body {
    CANVAS AREA
    ======================== */
 #canvas-container {
-  flex: 3;
+  flex: 1;
   position: relative;
   background: #222;
-  overflow: visible;
+  overflow: hidden;      /* canvas now fills this whole area */
   min-width: 0;
 }
 
 #canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: block;
   cursor: crosshair;
+  touch-action: none;
 }
 
 #magnifier {
@@ -42,6 +46,7 @@ body {
   pointer-events: none;
   display: none;
   box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  z-index: 5;
 }
 
 #status-bar {
@@ -54,6 +59,8 @@ body {
   padding: 4px 8px;
   font-size: 11px;
   font-family: monospace;
+  pointer-events: none;
+  z-index: 4;
 }
 
 /* ========================
@@ -203,22 +210,21 @@ summary:hover { color: #000; }
 /* ========================
    BUTTON STATES
    ======================== */
-button.active {
-  background-color: #4CAF50 !important;
-  color: white !important;
-  border-color: #388E3C !important;
-}
-
-button.log-active {
-  background-color: #2196F3 !important;
-  color: white !important;
-  border-color: #1565C0 !important;
-}
-
+/* One unified "in effect" look for EVERY toggle/mode button:
+   grey background + white text. Click again -> back to normal. */
+button.active,
+button.log-active,
 #sort-points.sort-active {
-  background-color: #FF9800 !important;
-  color: white !important;
-  border-color: #E65100 !important;
+  background-color: #6c757d !important;
+  color: #fff !important;
+  border-color: #495057 !important;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.35);
+}
+
+button.active:hover:not(:disabled),
+button.log-active:hover:not(:disabled),
+#sort-points.sort-active:hover:not(:disabled) {
+  background-color: #5a6268 !important;
 }
 
 /* ========================
@@ -314,9 +320,11 @@ button.log-active {
 #highlight-line.holographic:hover { animation-duration: 1.5s; }
 
 #highlight-line.holographic.active {
-  background: linear-gradient(90deg, #11998e, #38ef7d, #11998e);
-  background-size: 200% 100%;
-  animation: holographic 2s linear infinite;
+  background: #6c757d !important;
+  background-image: none !important;
+  animation: none;
+  border: 1px solid #495057;
+  color: #fff;
 }
 
 @keyframes holographic {
@@ -335,6 +343,69 @@ details:has(#brightness-slider) {
 details:has(#brightness-slider) summary {
   color: #1565C0;
 }
+
+/* ========================
+   SNAP OPTIONS
+   ======================== */
+#snap-options { padding: 2px 0 0 2px; }
+
+.inline-row {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 !important;
+  font-size: 12px;
+}
+
+.inline-row label { white-space: nowrap; }
+.inline-row select { flex: 1; margin: 0; }
+.inline-row button { flex: 1; width: auto; margin: 0; }
+
+input[type="color"] {
+  width: 44px;
+  height: 30px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.swatch {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #888;
+  border-radius: 4px;
+  background: #fff;
+  flex: 0 0 auto;
+}
+
+#snap-live-hex {
+  font-family: monospace;
+  font-size: 11px;
+  color: #555;
+}
+
+/* Floating "what colour is under the pointer" tooltip (eyedropper mode) */
+#color-tip {
+  position: absolute;
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 5px;
+  background: rgba(0,0,0,0.85);
+  color: #fff;
+  border-radius: 6px;
+  font: 11px monospace;
+  pointer-events: none;
+  z-index: 6;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+#color-tip .swatch { width: 18px; height: 18px; border-color: #fff; }
 
 /* ========================
    DARK MODE
@@ -370,6 +441,15 @@ body.dark input[type="file"] {
 }
 
 body.dark button:hover:not(:disabled) { background: #555; }
+body.dark button.active,
+body.dark button.log-active,
+body.dark #sort-points.sort-active {
+  background-color: #7d848b !important;
+  border-color: #aab1b8 !important;
+  color: #fff !important;
+}
+body.dark #snap-live-hex { color: #bbb; }
+body.dark input[type="color"] { border-color: #666; background: #444; }
 
 body.dark .point-item  { color: #ccc; border-bottom-color: #444; }
 body.dark #preview-table td { border-color: #555; }
