@@ -12,6 +12,7 @@
     <div id="canvas-container">
       <canvas id="canvas"></canvas>
       <canvas id="magnifier" width="120" height="120"></canvas>
+      <div id="pick-banner">🧪 Color detection ON — hover over the graph, <b>click</b> to use the color, <b>Esc</b> to cancel</div>
       <div id="color-tip"><span class="swatch"></span><span class="tip-text"></span></div>
       <div id="status-bar"></div>
     </div>
@@ -31,6 +32,34 @@
         <p>Magnifier Zoom:
           <input type="range" id="magnifier-zoom" min="1" max="10" step="0.5" value="2" title="Magnifier zoom level">
         </p>
+      </details>
+
+      <!-- CALIBRATION -->
+      <details open>
+        <summary>Calibration</summary>
+        <p id="axis-instruction">Click "Set Axis Points" then enter values.</p>
+        <button id="set-axes"          title="Start axis calibration">Set Axis Points</button>
+        <button id="reset-axis-points" title="Reset axis points">Reset Axis Points</button>
+        <div id="axis-inputs">
+          <p class="checkbox-container">
+            <input type="checkbox" id="shared-origin" title="Use same point for X1 and Y1">
+            <label for="shared-origin">Shared Origin (X1/Y1)</label>
+          </p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="orthogonal-axes" title="Enforce orthogonal axis snapping">
+            <label for="orthogonal-axes">Orthogonal Axes</label>
+          </p>
+          <!-- FIX #1: Use proper <label> elements so updateAxisLabels() can target them -->
+          <p><label for="x1-value">X1:</label> <input type="number" id="x1-value" step="any"></p>
+          <p><label for="x2-value">X2:</label> <input type="number" id="x2-value" step="any"></p>
+          <p><label for="y1-value">Y1:</label> <input type="number" id="y1-value" step="any"></p>
+          <p><label for="y2-value">Y2:</label> <input type="number" id="y2-value" step="any"></p>
+          <button id="calibrate" title="Apply calibration" disabled>Calibrate</button>
+        </div>
+        <button id="reset-calibration" title="Clear calibration">Reset Calibration</button>
+        <button id="toggle-grid"       title="Show/hide overlay grid">Toggle Grid</button>
+        <button id="toggle-log-x"      title="Toggle X-axis log scale">Toggle Log Scale (X)</button>
+        <button id="toggle-log-y"      title="Toggle Y-axis log scale">Toggle Log Scale (Y)</button>
       </details>
 
       <!-- IMAGE ENHANCEMENTS -->
@@ -81,34 +110,6 @@
             </p>
           </div>
         </div>
-      </details>
-
-      <!-- CALIBRATION -->
-      <details open>
-        <summary>Calibration</summary>
-        <p id="axis-instruction">Click "Set Axis Points" then enter values.</p>
-        <button id="set-axes"          title="Start axis calibration">Set Axis Points</button>
-        <button id="reset-axis-points" title="Reset axis points">Reset Axis Points</button>
-        <div id="axis-inputs">
-          <p class="checkbox-container">
-            <input type="checkbox" id="shared-origin" title="Use same point for X1 and Y1">
-            <label for="shared-origin">Shared Origin (X1/Y1)</label>
-          </p>
-          <p class="checkbox-container">
-            <input type="checkbox" id="orthogonal-axes" title="Enforce orthogonal axis snapping">
-            <label for="orthogonal-axes">Orthogonal Axes</label>
-          </p>
-          <!-- FIX #1: Use proper <label> elements so updateAxisLabels() can target them -->
-          <p><label for="x1-value">X1:</label> <input type="number" id="x1-value" step="any"></p>
-          <p><label for="x2-value">X2:</label> <input type="number" id="x2-value" step="any"></p>
-          <p><label for="y1-value">Y1:</label> <input type="number" id="y1-value" step="any"></p>
-          <p><label for="y2-value">Y2:</label> <input type="number" id="y2-value" step="any"></p>
-          <button id="calibrate" title="Apply calibration" disabled>Calibrate</button>
-        </div>
-        <button id="reset-calibration" title="Clear calibration">Reset Calibration</button>
-        <button id="toggle-grid"       title="Show/hide overlay grid">Toggle Grid</button>
-        <button id="toggle-log-x"      title="Toggle X-axis log scale">Toggle Log Scale (X)</button>
-        <button id="toggle-log-y"      title="Toggle Y-axis log scale">Toggle Log Scale (Y)</button>
       </details>
 
       <!-- POINT ACTIONS -->
