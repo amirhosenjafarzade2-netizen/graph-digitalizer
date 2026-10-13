@@ -128,6 +128,7 @@ const snapCustomOptions  = document.getElementById('snap-custom-options');
 const snapLive           = document.getElementById('snap-live');
 const snapLiveHex        = document.getElementById('snap-live-hex');
 const colorTip           = document.getElementById('color-tip');
+const pickBanner         = document.getElementById('pick-banner');
 
 /**********************
  * UTILITIES
@@ -269,6 +270,8 @@ function syncSnapUI() {
   document.getElementById('snap-tol-val').textContent = snapTolerance;
   snapCustomOptions.style.display = snapColorMode === 'custom' ? 'block' : 'none';
   snapPickBtn.classList.toggle('active', pickingSnapColor);
+  snapPickBtn.textContent = pickingSnapColor ? '✖ Stop detecting (Esc)' : '🧪 Detect color';
+  pickBanner.style.display = pickingSnapColor ? 'block' : 'none';
 }
 
 /** Hide the eyedropper tooltip and reset the live preview text. */
@@ -769,7 +772,7 @@ function updateButtonStates() {
 
   const activeModes = ['add', 'adjust', 'delete', 'highlight', 'axes'];
   if (isPanning)               canvas.style.cursor = isPanDragging ? 'grabbing' : 'grab';
-  else if (pickingSnapColor)   canvas.style.cursor = 'copy';
+  else if (pickingSnapColor)   canvas.style.cursor = 'crosshair';
   else                         canvas.style.cursor = activeModes.includes(mode) ? 'crosshair' : 'default';
   statusBar.textContent = `Mode: ${isPanning ? 'pan' : mode}`;
 }
