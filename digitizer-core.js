@@ -1,31 +1,48 @@
 /**********************
  * DIGITIZER CORE
- * Handles: state, session, coordinate math,
- *          drawing, calibration, history, image loading
+ * Handles: state, session, coordinate math, drawing, calibration,
+ *          history, image loading, view (zoom/pan/fit)
  *
- * FIXES:
- *  1. updateAxisLabels() — now targets <p> text nodes, not missing <label for> elements
- *  2. toggleLogX/Y     — guard against missing axis points before index access
- *  3. canvasToDataCoords — meaningful NaN/non-finite guard; no silent pixel fallback
- *  4. loadSession()    — mode reset to 'none' when not calibrated
- *  5. Grid overlay     — swap yMin/yMax so loop always runs in the right direction
- *  6. img.onload race  — handlers set before src assignment
- *  13. updateButtonStates — cursor is 'crosshair' for add/adjust/delete modes
+ * MAJOR CHANGES IN THIS VERSION
+ *  A. COORDINATE SPACE = IMAGE PIXELS. Points are stored in image-pixel
+ *     coordinates, so they never drift when the window is resized.
+ *  B. The <canvas> now fills the whole canvas area (no more unused grey
+ *     space). The image is fitted/centred inside it and can be zoomed/panned.
+ *  C. draw() is coalesced with requestAnimationFrame (it used to be a
+ *     debounce, which delayed every frame until the mouse stopped = laggy pan).
+ *  D. Brightness/contrast/grid-filter are rendered ONCE into an off-screen
+ *     canvas (enhancedCanvas) and re-used for every frame and the magnifier.
+ *  E. Grid filter blur is now a fast separable box blur (O(n) instead of O(n*r^2)).
+ *  F. Session saving is debounced (localStorage no longer written per frame).
+ *  G. Unified "in effect" button style (grey + white text) for every toggle.
+ *  H. Snap target can be a user-chosen colour (see digitizer-tools.js).
  **********************/
 
 /**********************
  * GLOBAL STATE
  **********************/
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const magnifier = document.getElementById('magnifier');
-const magCtx = magnifier.getContext('2d');
+const canvas          = document.getElementById('canvas');
+const ctx             = canvas.getContext('2d');
+const canvasContainer = document.getElementById('canvas-container');
+const magnifier       = document.getElementById('magnifier');
+const magCtx          = magnifier.getContext('2d');
 
 let img = new Image();
-let rawImageData = null;       // original pixel data, never mutated
-let processedImageData = null; // brightness/contrast/grid-filtered pixel data — used by auto-trace & snap
+let rawImageData = null;        // original pixel data, never mutated
+let processedImageData = null;  // brightness/contrast/grid-filtered pixels (used by snap & auto-trace)
 
-let zoom = 1, panX = 0, panY = 0, isPanning = false, isPanDragging = false, startPan = { x: 0, y: 0 };
+// Off-screen canvases
+const offCanvas      = document.createElement('canvas');   // raw pixel sampling
+const offCtx         = offCanvas.getContext('2d', { willReadFrequently: true });
+const enhancedCanvas = document.createElement('canvas');   // what is actually shown
+const enhancedCtx    = enhancedCanvas.getContext('2d');
+
+// View state. zoom/pan are in CSS pixels; world space == image pixels.
+let zoom = 1, panX = 0, panY = 0;
+let viewW = 0, viewH = 0, dpr = 1;
+const MIN_ZOOM = 0.02, MAX_ZOOM = 60;
+
+let isPanning = false, isPanDragging = false, startPan = { x: 0, y: 0 };
 let axisPoints = [], isCalibrated = false, scaleX, scaleY, offsetX, offsetY;
 let lines = [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }], currentLineIndex = 0;
 let mode = 'none'; // 'none','axes','add','adjust','delete','highlight'
@@ -37,11 +54,19 @@ let isDraggingPoint = false;
 let highlightWidth = 2;
 let magnifierZoom = 2;
 
-// Enhancement state (all optional, off by default)
-let brightnessVal = 100;  // %
-let contrastVal   = 100;  // %
-let snapToLine    = false; // magnet snap
-let gridFilterOn  = false; // background/grid removal
+// Enhancement state
+let brightnessVal = 100;
+let contrastVal   = 100;
+let snapToLine    = false;   // magnet on/off
+let gridFilterOn  = false;
+
+// Snap target settings
+let snapColorMode  = 'dark';     // 'dark' | 'custom'
+let snapColor      = '#ff0000';  // used when snapColorMode === 'custom'
+let snapTolerance  = 60;         // RGB distance for custom colour
+let pickingSnapColor = false;    // eyedropper active
+
+const COORD_SPACE = 'image';     // marker saved with sessions / exports
 
 const lineColors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink', 'gray'];
 const axisLabels  = ['X1', 'X2', 'Y1', 'Y2'];
@@ -61,6 +86,8 @@ const resetCalibrationBtn= document.getElementById('reset-calibration');
 const toggleGridBtn      = document.getElementById('toggle-grid');
 const toggleLogXBtn      = document.getElementById('toggle-log-x');
 const toggleLogYBtn      = document.getElementById('toggle-log-y');
+const panModeBtn         = document.getElementById('pan-mode');
+const toggleThemeBtn     = document.getElementById('toggle-theme');
 const addPointBtn        = document.getElementById('add-point');
 const adjustPointBtn     = document.getElementById('adjust-point');
 const deletePointBtn     = document.getElementById('delete-point');
@@ -93,6 +120,14 @@ const brightnessSlider   = document.getElementById('brightness-slider');
 const contrastSlider     = document.getElementById('contrast-slider');
 const snapToggle         = document.getElementById('snap-toggle');
 const gridFilterToggle   = document.getElementById('grid-filter-toggle');
+const snapModeSelect     = document.getElementById('snap-mode');
+const snapColorInput     = document.getElementById('snap-color');
+const snapPickBtn        = document.getElementById('snap-pick');
+const snapTolSlider      = document.getElementById('snap-tol');
+const snapCustomOptions  = document.getElementById('snap-custom-options');
+const snapLive           = document.getElementById('snap-live');
+const snapLiveHex        = document.getElementById('snap-live-hex');
+const colorTip           = document.getElementById('color-tip');
 
 /**********************
  * UTILITIES
@@ -128,7 +163,11 @@ function showModal(msg, withInput = false, callback = null) {
   btnContainer.appendChild(cancelBtn);
   content.appendChild(btnContainer);
   modal.style.display = 'flex';
-  if (withInput) document.getElementById('modal-input').focus();
+  if (withInput) {
+    const inp = document.getElementById('modal-input');
+    inp.focus();
+    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') okBtn.click(); });
+  }
 }
 
 function showSpinner(on) { document.getElementById('spinner').style.display = on ? 'block' : 'none'; }
@@ -142,15 +181,14 @@ function debounce(func, wait) {
 }
 
 function throttle(func, limit) {
-  let inThrottle, lastFunc, lastRan;
+  let inThrottle, lastFunc;
   return function (...args) {
     if (!inThrottle) {
       func(...args);
-      lastRan    = Date.now();
       inThrottle = true;
       setTimeout(() => {
         inThrottle = false;
-        if (lastFunc) { lastFunc(); lastFunc = null; }
+        if (lastFunc) { const f = lastFunc; lastFunc = null; f(); }
       }, limit);
     } else {
       lastFunc = () => func(...args);
@@ -165,38 +203,119 @@ function download(filename, text, mimeType) {
   a.click();
 }
 
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return { r: 255, g: 0, b: 0 };
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function hasImage() { return !!rawImageData; }
+function imgW() { return rawImageData ? rawImageData.width  : 0; }
+function imgH() { return rawImageData ? rawImageData.height : 0; }
+
 /**********************
  * SESSION PERSISTENCE
  **********************/
-function saveSession() {
-  localStorage.setItem('digitizerState', JSON.stringify({
-    lines, axisPoints, scaleX, scaleY, offsetX, offsetY,
-    logX, logY, isCalibrated, zoom, panX, panY,
-    showGrid, mode, currentLineIndex, magnifierZoom,
-    brightnessVal, contrastVal, snapToLine, gridFilterOn
-  }));
+function _saveSessionNow() {
+  try {
+    localStorage.setItem('digitizerState', JSON.stringify({
+      coordSpace: COORD_SPACE,
+      lines, axisPoints, scaleX, scaleY, offsetX, offsetY,
+      logX, logY, isCalibrated, zoom, panX, panY,
+      showGrid, mode, currentLineIndex, magnifierZoom,
+      brightnessVal, contrastVal, snapToLine, gridFilterOn,
+      snapColorMode, snapColor, snapTolerance
+    }));
+  } catch (e) { console.warn('Could not save session:', e); }
+}
+// Debounced so wheel-zoom / dragging never hammers localStorage.
+const saveSession = debounce(_saveSessionNow, 300);
+window.addEventListener('beforeunload', _saveSessionNow);
+
+function normalizeLines() {
+  lines.forEach(line => {
+    if (typeof line.sorted === 'undefined') line.sorted = false;
+    if (typeof line.orderCounter === 'undefined') {
+      let max = 0;
+      line.points = line.points.map(p => {
+        if (typeof p.order === 'undefined') p.order = ++max;
+        else max = Math.max(max, p.order);
+        return p;
+      });
+      line.orderCounter = max;
+    }
+  });
+}
+
+function warnIfLegacy(state) {
+  if (state.coordSpace !== COORD_SPACE && (state.lines || []).some(l => l.points && l.points.length)) {
+    showModal('This session was saved by an older version that stored positions relative to the window size. ' +
+              'Data values are intact, but points may appear offset on the image. Re-calibrate / re-digitize if needed.');
+  }
+}
+
+function syncSnapUI() {
+  snapToggle.checked       = snapToLine;
+  snapModeSelect.value     = snapColorMode;
+  snapColorInput.value     = snapColor;
+  snapTolSlider.value      = snapTolerance;
+  document.getElementById('snap-tol-val').textContent = snapTolerance;
+  snapCustomOptions.style.display = snapColorMode === 'custom' ? 'block' : 'none';
+  snapPickBtn.classList.toggle('active', pickingSnapColor);
+}
+
+/** Hide the eyedropper tooltip and reset the live preview text. */
+function hideColorTip() {
+  colorTip.style.display = 'none';
+  snapLive.style.background = '';
+  snapLiveHex.textContent = 'Hover over the graph while detecting…';
+}
+
+/** Turn the eyedropper on/off. */
+function setPickingSnapColor(on) {
+  pickingSnapColor = !!on;
+  if (!pickingSnapColor) hideColorTip();
+  syncSnapUI();
+  updateButtonStates();
+}
+
+/**
+ * Live colour detection: sample the pixel under the pointer and show it in the
+ * floating tooltip and the side panel. (cx, cy) = world/image coords.
+ */
+function updateColorPreview(clientX, clientY, cx, cy) {
+  const pd = getPixelData();
+  if (!pd) return;
+  if (cx < 0 || cy < 0 || cx >= pd.width || cy >= pd.height) { colorTip.style.display = 'none'; return; }
+  const i   = (Math.floor(cy) * pd.width + Math.floor(cx)) * 4;
+  const hex = rgbToHex(pd.data[i], pd.data[i + 1], pd.data[i + 2]);
+  snapLive.style.background = hex;
+  snapLiveHex.textContent   = `${hex.toUpperCase()}  rgb(${pd.data[i]}, ${pd.data[i + 1]}, ${pd.data[i + 2]})`;
+  colorTip.querySelector('.swatch').style.background = hex;
+  colorTip.querySelector('.tip-text').textContent = hex.toUpperCase();
+  const rect = canvas.getBoundingClientRect();
+  const mx = clientX - rect.left, my = clientY - rect.top;
+  colorTip.style.display = 'flex';
+  colorTip.style.left = Math.min(viewW - 110, Math.max(0, mx + 18)) + 'px';
+  colorTip.style.top  = Math.max(0, my - 36) + 'px';
 }
 
 function loadSession() {
   const s = localStorage.getItem('digitizerState');
-  axisInputs.style.display       = 'none';
+  axisInputs.style.display        = 'none';
   highlightControls.style.display = 'none';
   if (s) {
     try {
       const state = JSON.parse(s);
       lines = state.lines || [{ name: 'Line 1', points: [], sorted: false, orderCounter: 0 }];
-      lines.forEach(line => {
-        if (typeof line.sorted === 'undefined') line.sorted = false;
-        if (typeof line.orderCounter === 'undefined') {
-          let max = 0;
-          line.points = line.points.map(p => {
-            if (typeof p.order === 'undefined') p.order = ++max;
-            else max = Math.max(max, p.order);
-            return p;
-          });
-          line.orderCounter = max;
-        }
-      });
+      normalizeLines();
       axisPoints      = state.axisPoints  || [];
       scaleX          = state.scaleX;
       scaleY          = state.scaleY;
@@ -215,26 +334,23 @@ function loadSession() {
       contrastVal     = state.contrastVal     ?? 100;
       snapToLine      = state.snapToLine      || false;
       gridFilterOn    = state.gridFilterOn    || false;
+      snapColorMode   = state.snapColorMode   || 'dark';
+      snapColor       = state.snapColor       || '#ff0000';
+      snapTolerance   = state.snapTolerance   ?? 60;
 
-      // FIX #4: Only restore active digitising modes if actually calibrated;
-      // otherwise fall back to 'none' to prevent orphaned mode state.
       const savedMode = state.mode || 'none';
-      if (!isCalibrated && ['add', 'adjust', 'delete', 'highlight'].includes(savedMode)) {
-        mode = 'none';
-      } else {
-        mode = savedMode;
-      }
+      mode = (!isCalibrated && ['add', 'adjust', 'delete', 'highlight'].includes(savedMode)) ? 'none' : savedMode;
 
       updateLineSelect();
       updatePreview();
       updateButtonStates();
-      toggleLogXBtn.classList.toggle('log-active', logX);
-      toggleLogYBtn.classList.toggle('log-active', logY);
       document.getElementById('magnifier-zoom').value = magnifierZoom;
       brightnessSlider.value = brightnessVal;
       contrastSlider.value   = contrastVal;
-      snapToggle.checked       = snapToLine;
+      document.getElementById('brightness-val').textContent = brightnessVal + '%';
+      document.getElementById('contrast-val').textContent   = contrastVal + '%';
       gridFilterToggle.checked = gridFilterOn;
+      syncSnapUI();
       highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
       axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
       updateAxisLabels();
@@ -245,10 +361,11 @@ function loadSession() {
           ? `Click point for ${sharedOrigin.checked && axisPoints.length === 0 ? 'Shared Origin (X1/Y1)' : axisLabels[axisPoints.length]} on the chart.`
           : 'Enter axis values and click Calibrate.';
       draw();
+      warnIfLegacy(state);
     } catch (e) {
       console.error('Failed to load session:', e);
       showModal('Failed to load session. Starting fresh.');
-      axisInputs.style.display       = 'none';
+      axisInputs.style.display        = 'none';
       highlightControls.style.display = 'none';
     }
   }
@@ -256,14 +373,14 @@ function loadSession() {
 
 function _applyCalibrationButtonState() {
   const en = isCalibrated;
-  addPointBtn.disabled     = !en;
-  adjustPointBtn.disabled  = !en;
-  deletePointBtn.disabled  = !en;
-  highlightLineBtn.disabled= !en;
-  clearPointsBtn.disabled  = !en;
-  sortPointsBtn.disabled   = !en;
-  newLineBtn.disabled      = !en;
-  renameLineBtn.disabled   = !en;
+  addPointBtn.disabled      = !en;
+  adjustPointBtn.disabled   = !en;
+  deletePointBtn.disabled   = !en;
+  highlightLineBtn.disabled = !en;
+  clearPointsBtn.disabled   = !en;
+  sortPointsBtn.disabled    = !en;
+  newLineBtn.disabled       = !en;
+  renameLineBtn.disabled    = !en;
 }
 
 /**********************
@@ -280,6 +397,7 @@ function saveState() {
     highlightPath:  JSON.parse(JSON.stringify(highlightPath)),
     isHighlighting
   });
+  if (history.length > 200) { history.shift(); historyIndex--; }
   historyIndex++;
   undoBtn.disabled = historyIndex <= 0;
   redoBtn.disabled = historyIndex >= history.length - 1;
@@ -296,20 +414,19 @@ function _restoreState(state) {
   logX           = state.logX;
   logY           = state.logY;
   isCalibrated   = state.isCalibrated;
-  zoom           = state.zoom;
-  panX           = state.panX;
-  panY           = state.panY;
+  // NOTE: zoom/pan are deliberately NOT restored by undo/redo – undo should
+  // change data, not yank the view around.
   showGrid       = state.showGrid;
   mode           = state.mode;
-  currentLineIndex= state.currentLineIndex;
+  currentLineIndex = state.currentLineIndex;
   magnifierZoom  = state.magnifierZoom;
   highlightPath  = state.highlightPath  || [];
   isHighlighting = state.isHighlighting || false;
-  toggleLogXBtn.classList.toggle('log-active', logX);
-  toggleLogYBtn.classList.toggle('log-active', logY);
+  selectedPointIndex = -1;
   document.getElementById('magnifier-zoom').value = magnifierZoom;
   updateLineSelect();
   updatePreview();
+  _applyCalibrationButtonState();
   updateButtonStates();
   highlightControls.style.display = mode === 'highlight' ? 'block' : 'none';
   axisInputs.style.display = isCalibrated ? 'none' : (mode === 'axes' && axisPoints.length > 0) ? 'block' : 'none';
@@ -320,7 +437,6 @@ function _restoreState(state) {
     : axisPoints.length < (sharedOrigin.checked ? 3 : 4)
       ? `Click point for ${sharedOrigin.checked && axisPoints.length === 0 ? 'Shared Origin (X1/Y1)' : axisLabels[axisPoints.length]} on the chart.`
       : 'Enter axis values and click Calibrate.';
-  sortPointsBtn.classList.toggle('sort-active', lines[currentLineIndex].sorted);
   draw();
   saveSession();
 }
@@ -338,17 +454,55 @@ redoBtn.addEventListener('click', () => {
 });
 
 /**********************
+ * VIEW: sizing, fit, zoom
+ **********************/
+function resizeCanvas(forceFit = false) {
+  const nw = Math.max(1, Math.floor(canvasContainer.clientWidth));
+  const nh = Math.max(1, Math.floor(canvasContainer.clientHeight));
+  dpr = window.devicePixelRatio || 1;
+
+  // Keep the image centre stable while the window is resized.
+  if (!forceFit && viewW && hasImage()) {
+    panX += (nw - viewW) / 2;
+    panY += (nh - viewH) / 2;
+  }
+  viewW = nw; viewH = nh;
+  canvas.style.width  = nw + 'px';
+  canvas.style.height = nh + 'px';
+  canvas.width  = Math.round(nw * dpr);
+  canvas.height = Math.round(nh * dpr);
+  if (forceFit) fitView();
+  render(); // synchronous – assigning canvas.width cleared it
+}
+
+function fitView() {
+  if (!hasImage() || !viewW) { zoom = 1; panX = 0; panY = 0; return; }
+  const margin = 0.98;
+  zoom = Math.min(viewW / imgW(), viewH / imgH()) * margin;
+  panX = (viewW - imgW() * zoom) / 2;
+  panY = (viewH - imgH() * zoom) / 2;
+}
+
+function zoomAt(factor, cx = viewW / 2, cy = viewH / 2) {
+  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+  const ratio = newZoom / zoom;
+  panX = cx - (cx - panX) * ratio;
+  panY = cy - (cy - panY) * ratio;
+  zoom = newZoom;
+  draw(); saveSession();
+}
+
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => resizeCanvas(false)).observe(canvasContainer);
+} else {
+  window.addEventListener('resize', () => resizeCanvas(false));
+}
+
+/**********************
  * IMAGE LOADING & ENHANCEMENT
  **********************/
-
-// Off-screen canvas to hold the raw image for pixel sampling
-const offCanvas = document.createElement('canvas');
-const offCtx    = offCanvas.getContext('2d');
-
 function loadImage(dataUrl) {
   showSpinner(true);
-
-  // FIX #6: Set handlers BEFORE assigning src to avoid race condition with cached images.
   const newImg = new Image();
   newImg.onload = () => {
     if (newImg.naturalWidth <= 0 || newImg.naturalHeight <= 0) {
@@ -357,21 +511,16 @@ function loadImage(dataUrl) {
       return;
     }
     img = newImg;
-    zoom  = 1; panX = 0; panY = 0;
-    canvas.width  = Math.min(img.naturalWidth,  window.innerWidth * 0.75);
-    canvas.height = canvas.width * (img.naturalHeight / img.naturalWidth);
-
-    // Cache raw pixel data in off-screen canvas
     offCanvas.width  = img.naturalWidth;
     offCanvas.height = img.naturalHeight;
     offCtx.drawImage(img, 0, 0);
     rawImageData = offCtx.getImageData(0, 0, offCanvas.width, offCanvas.height);
     buildProcessedImageData();
-    draw();
+    resizeCanvas(true);   // fits the image to the full canvas area
     setAxesBtn.disabled         = false;
     resetAxisPointsBtn.disabled = false;
     saveState();
-    saveSession();
+    _saveSessionNow();
     showSpinner(false);
     document.dispatchEvent(new Event('imageLoaded'));
   };
@@ -382,9 +531,47 @@ function loadImage(dataUrl) {
   newImg.src = dataUrl;
 }
 
+/** Fast separable box blur on RGB (alpha forced to 255). */
+function boxBlurRGB(src, w, h, r) {
+  const tmp = new Uint8ClampedArray(src.length);
+  const out = new Uint8ClampedArray(src.length);
+  // horizontal
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let ch = 0; ch < 3; ch++) {
+      let sum = 0;
+      for (let x = 0, e = Math.min(r, w - 1); x <= e; x++) sum += src[row + x * 4 + ch];
+      for (let x = 0; x < w; x++) {
+        const lo = Math.max(0, x - r), hi = Math.min(w - 1, x + r);
+        tmp[row + x * 4 + ch] = sum / (hi - lo + 1);
+        if (x + r + 1 < w) sum += src[row + (x + r + 1) * 4 + ch];
+        if (x - r >= 0)    sum -= src[row + (x - r) * 4 + ch];
+      }
+    }
+  }
+  // vertical
+  const stride = w * 4;
+  for (let x = 0; x < w; x++) {
+    for (let ch = 0; ch < 3; ch++) {
+      const col = x * 4 + ch;
+      let sum = 0;
+      for (let y = 0, e = Math.min(r, h - 1); y <= e; y++) sum += tmp[y * stride + col];
+      for (let y = 0; y < h; y++) {
+        const lo = Math.max(0, y - r), hi = Math.min(h - 1, y + r);
+        out[y * stride + col] = sum / (hi - lo + 1);
+        if (y + r + 1 < h) sum += tmp[(y + r + 1) * stride + col];
+        if (y - r >= 0)    sum -= tmp[(y - r) * stride + col];
+      }
+    }
+  }
+  for (let i = 3; i < out.length; i += 4) out[i] = 255;
+  return out;
+}
+
 /**
- * Recompute processedImageData from rawImageData by applying brightness,
- * contrast and grid-filter in pixel space.
+ * Recompute processedImageData (brightness, contrast, grid filter) AND the
+ * enhancedCanvas that is displayed. What you see is exactly what snap and
+ * auto-trace sample.
  */
 function buildProcessedImageData() {
   if (!rawImageData) { processedImageData = null; return; }
@@ -393,101 +580,83 @@ function buildProcessedImageData() {
   const bcData = new Uint8ClampedArray(len);
   for (let i = 0; i < len; i += 4) {
     for (let ch = 0; ch < 3; ch++) {
-      let v = src[i + ch];
-      v = v * bF;
+      let v = src[i + ch] * bF;
       v = (v - 128) * cF + 128;
-      bcData[i + ch] = Math.min(255, Math.max(0, v));
+      bcData[i + ch] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
     bcData[i + 3] = src[i + 3];
   }
+
   if (gridFilterOn) {
-    const BLUR_R = 3;
-    const blurred = new Uint8ClampedArray(len);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let rS = 0, gS = 0, bS = 0, cnt = 0;
-        for (let dy = -BLUR_R; dy <= BLUR_R; dy++) {
-          for (let dx = -BLUR_R; dx <= BLUR_R; dx++) {
-            const nx = x + dx, ny = y + dy;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-            const j = (ny * w + nx) * 4;
-            rS += bcData[j]; gS += bcData[j+1]; bS += bcData[j+2]; cnt++;
-          }
-        }
-        const j = (y * w + x) * 4;
-        blurred[j] = rS/cnt; blurred[j+1] = gS/cnt; blurred[j+2] = bS/cnt; blurred[j+3] = 255;
-      }
-    }
+    const blurred = boxBlurRGB(bcData, w, h, 3);
     const out = new Uint8ClampedArray(len);
     for (let i = 0; i < len; i += 4) {
       for (let ch = 0; ch < 3; ch++) {
-        const a = bcData[i+ch]/255, b = blurred[i+ch]/255;
-        const s = 1-(1-a)*(1-b);
-        out[i+ch] = Math.round((a + 0.35*(s-a))*255);
+        const a = bcData[i + ch] / 255, b = blurred[i + ch] / 255;
+        const s = 1 - (1 - a) * (1 - b);
+        out[i + ch] = Math.round((a + 0.35 * (s - a)) * 255);
       }
-      out[i+3] = bcData[i+3];
+      out[i + 3] = bcData[i + 3];
     }
     processedImageData = new ImageData(out, w, h);
   } else {
     processedImageData = new ImageData(bcData, w, h);
   }
+
+  enhancedCanvas.width  = w;
+  enhancedCanvas.height = h;
+  enhancedCtx.putImageData(processedImageData, 0, 0);
 }
 
-/** Returns the pixel buffer that auto-trace/snap should use (with enhancements applied). */
+let _enhanceQueued = false;
+function scheduleEnhance() {
+  if (_enhanceQueued) return;
+  _enhanceQueued = true;
+  requestAnimationFrame(() => {
+    _enhanceQueued = false;
+    buildProcessedImageData();
+    render();
+  });
+}
+
 function getPixelData() { return processedImageData || rawImageData; }
 
-/**
- * Return the pixel [r,g,b,a] from the original raw image at image-space (ix, iy).
- */
 function getRawPixel(ix, iy) {
   if (!rawImageData) return null;
-  const iw = rawImageData.width;
-  const ih = rawImageData.height;
-  const px = Math.round(Math.max(0, Math.min(ix, iw - 1)));
-  const py = Math.round(Math.max(0, Math.min(iy, ih - 1)));
-  const i  = (py * iw + px) * 4;
+  const px = Math.floor(Math.max(0, Math.min(ix, rawImageData.width  - 1)));
+  const py = Math.floor(Math.max(0, Math.min(iy, rawImageData.height - 1)));
+  const i  = (py * rawImageData.width + px) * 4;
   return rawImageData.data.slice(i, i + 4);
 }
 
-/**
- * Canvas coords (x,y) → image coords (ix, iy).
- */
-function canvasToImageCoords(cx, cy) {
-  return {
-    ix: cx * (img.naturalWidth  / canvas.width),
-    iy: cy * (img.naturalHeight / canvas.height)
-  };
-}
+/** World coords == image pixel coords now, so this is the identity. */
+function canvasToImageCoords(cx, cy) { return { ix: cx, iy: cy }; }
 
 /**********************
  * COORDINATE TRANSFORMS
  **********************/
+/** Screen (client) → world (image-pixel) coordinates. */
 function imageToCanvasCoords(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  const x    = (clientX - rect.left - panX) / zoom;
-  const y    = (clientY - rect.top  - panY) / zoom;
-  return { x, y };
+  return {
+    x: (clientX - rect.left - panX) / zoom,
+    y: (clientY - rect.top  - panY) / zoom
+  };
 }
 
-/**
- * FIX #3: canvasToDataCoords — returns null on genuinely invalid results
- * instead of silently falling back to raw pixel values, which corrupts exports.
- */
 function canvasToDataCoords(x, y) {
   try {
     if (!isFinite(scaleX) || !isFinite(scaleY) || scaleX === 0 || scaleY === 0) return null;
     let dataX, dataY;
     if (logX) {
-      const exp = (x - offsetX) / scaleX;
-      dataX = Math.pow(10, exp);
+      dataX = Math.pow(10, (x - offsetX) / scaleX);
       if (!isFinite(dataX) || dataX <= 0) return null;
     } else {
       dataX = (x - offsetX) / scaleX;
       if (!isFinite(dataX)) return null;
     }
     if (logY) {
-      const exp = (y - offsetY) / scaleY;
-      dataY = Math.pow(10, exp);
+      dataY = Math.pow(10, (y - offsetY) / scaleY);
       if (!isFinite(dataY) || dataY <= 0) return null;
     } else {
       dataY = (y - offsetY) / scaleY;
@@ -502,11 +671,6 @@ function canvasToDataCoords(x, y) {
 /**********************
  * UI UPDATES
  **********************/
-
-/**
- * FIX #1: updateAxisLabels() — HTML now uses proper <label for="x1-value"> elements,
- * so we can target them directly with querySelector.
- */
 function updateAxisLabels() {
   const x1Label = document.querySelector('label[for="x1-value"]');
   const y1Label = document.querySelector('label[for="y1-value"]');
@@ -522,8 +686,8 @@ function updateAxisLabels() {
 function updateLineSelect() {
   lineSelect.innerHTML = '';
   lines.forEach((line, i) => {
-    const opt   = document.createElement('option');
-    opt.value   = i;
+    const opt = document.createElement('option');
+    opt.value = i;
     opt.textContent = line.name;
     lineSelect.appendChild(opt);
   });
@@ -531,32 +695,39 @@ function updateLineSelect() {
 }
 
 function updatePreview() {
+  // Preview table
   previewTable.innerHTML = '';
   if (lines.every(l => l.points.length === 0)) {
     previewTable.innerHTML = '<tr><td>No data</td></tr>';
-    return;
-  }
-  lines.forEach(line => {
-    if (!line.points.length) return;
-    const nameRow = document.createElement('tr');
-    nameRow.innerHTML = `<td colspan="2"><strong>${line.name}</strong></td>`;
-    previewTable.appendChild(nameRow);
-    const hdr = document.createElement('tr');
-    hdr.innerHTML = '<td>X</td><td>Y</td>';
-    previewTable.appendChild(hdr);
-    line.points.forEach(p => {
-      const row = document.createElement('tr');
-      const dX  = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(6);
-      const dY  = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(6);
-      row.innerHTML = `<td>${dX}</td><td>${dY}</td>`;
-      previewTable.appendChild(row);
+  } else {
+    lines.forEach(line => {
+      if (!line.points.length) return;
+      const nameRow = document.createElement('tr');
+      nameRow.innerHTML = `<td colspan="2"><strong>${escapeHtml(line.name)}</strong></td>`;
+      previewTable.appendChild(nameRow);
+      const hdr = document.createElement('tr');
+      hdr.innerHTML = '<td>X</td><td>Y</td>';
+      previewTable.appendChild(hdr);
+      line.points.forEach(p => {
+        const row = document.createElement('tr');
+        const dX  = isNaN(p.dataX) || !isFinite(p.dataX) ? 'NaN' : p.dataX.toFixed(6);
+        const dY  = isNaN(p.dataY) || !isFinite(p.dataY) ? 'NaN' : p.dataY.toFixed(6);
+        row.innerHTML = `<td>${dX}</td><td>${dY}</td>`;
+        previewTable.appendChild(row);
+      });
     });
-  });
-  // Update point list sidebar
+  }
+
+  updatePointList();
+}
+
+/** Sidebar "Points (current line)" list. Always rebuilt from scratch. */
+function updatePointList() {
   if (pointList) {
     pointList.innerHTML = '';
     const line = lines[currentLineIndex];
-    const pts  = line.sorted
+    if (!line) return;
+    const pts = line.sorted
       ? [...line.points].sort((a, b) => a.dataX - b.dataX)
       : [...line.points].sort((a, b) => a.order - b.order);
     pts.forEach((p, i) => {
@@ -578,239 +749,200 @@ function findNearestPointIndex(x, y) {
 }
 
 /**
- * FIX #13: cursor is 'crosshair' for all active digitising modes,
- * not just 'highlight' and 'axes'.
+ * Single place that decides which buttons look "in effect" (grey + white text).
+ * Every toggle in the app funnels through here.
  */
 function updateButtonStates() {
-  addPointBtn.classList.toggle('active',    mode === 'add');
-  adjustPointBtn.classList.toggle('active', mode === 'adjust');
-  deletePointBtn.classList.toggle('active', mode === 'delete');
-  highlightLineBtn.classList.toggle('active', mode === 'highlight');
+  const on = (el, flag) => el && el.classList.toggle('active', !!flag);
+  on(setAxesBtn,       mode === 'axes');
+  on(addPointBtn,      mode === 'add');
+  on(adjustPointBtn,   mode === 'adjust');
+  on(deletePointBtn,   mode === 'delete');
+  on(highlightLineBtn, mode === 'highlight');
+  on(panModeBtn,       isPanning);
+  on(toggleGridBtn,    showGrid);
+  on(toggleLogXBtn,    logX);
+  on(toggleLogYBtn,    logY);
+  on(toggleThemeBtn,   document.body.classList.contains('dark'));
+  on(sortPointsBtn,    lines[currentLineIndex] && lines[currentLineIndex].sorted);
+  on(snapPickBtn,      pickingSnapColor);
+
   const activeModes = ['add', 'adjust', 'delete', 'highlight', 'axes'];
-  canvas.style.cursor = isPanning ? 'move' : activeModes.includes(mode) ? 'crosshair' : 'default';
-  statusBar.textContent = `Mode: ${mode}`;
+  if (isPanning)               canvas.style.cursor = isPanDragging ? 'grabbing' : 'grab';
+  else if (pickingSnapColor)   canvas.style.cursor = 'copy';
+  else                         canvas.style.cursor = activeModes.includes(mode) ? 'crosshair' : 'default';
+  statusBar.textContent = `Mode: ${isPanning ? 'pan' : mode}`;
 }
 
 /**********************
  * DRAWING
  **********************/
 
-function buildFilter() {
-  return `brightness(${brightnessVal}%) contrast(${contrastVal}%)`;
-}
-
-function drawImageWithEnhancements() {
-  if (!img.src || !img.complete || img.naturalWidth === 0) return;
-
-  ctx.save();
-
-  if (gridFilterOn) {
-    const tmp = document.createElement('canvas');
-    tmp.width  = canvas.width;
-    tmp.height = canvas.height;
-    const tCtx = tmp.getContext('2d');
-
-    tCtx.filter = buildFilter();
-    tCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    const tmp2  = document.createElement('canvas');
-    tmp2.width  = canvas.width;
-    tmp2.height = canvas.height;
-    const t2Ctx = tmp2.getContext('2d');
-    t2Ctx.filter = `blur(2px) ${buildFilter()}`;
-    t2Ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    tCtx.globalCompositeOperation = 'screen';
-    tCtx.globalAlpha = 0.35;
-    tCtx.drawImage(tmp2, 0, 0);
-    tCtx.globalCompositeOperation = 'source-over';
-    tCtx.globalAlpha = 1;
-
-    ctx.drawImage(tmp, 0, 0);
-  } else {
-    ctx.filter = buildFilter();
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    ctx.filter = 'none';
-  }
-
-  ctx.restore();
-}
-
-const draw = debounce(() => {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.save();
-  ctx.translate(panX, panY);
-  ctx.scale(zoom, zoom);
-
-  if (img.src && img.complete && img.naturalWidth > 0) {
-    try {
-      drawImageWithEnhancements();
-    } catch (e) {
-      console.error('Error drawing image:', e);
-    }
-  } else {
-    ctx.fillStyle = '#333';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#fff';
-    ctx.font = '16px Arial';
-    ctx.fillText('No image loaded. Please upload an image.', 10, 30);
-  }
+/** Draws grid, axis points, data points and highlight path. z = current zoom. */
+function drawOverlays(c, z, W, H) {
+  c.save();
 
   // Grid overlay
-  // FIX #5: Ensure yMin < yMax by sorting so the loop always iterates correctly,
-  // handling graphs where the Y axis runs upward in image space (scaleY negative).
-  if (isCalibrated && showGrid) {
-    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-    ctx.lineWidth = 1 / zoom;
+  const needPts = sharedOrigin.checked ? 3 : 4;
+  if (isCalibrated && showGrid && axisPoints.length >= needPts) {
+    c.strokeStyle = 'rgba(0,0,0,0.25)';
+    c.lineWidth = 1 / z;
 
-    const xA = logX ? Math.pow(10, (axisPoints[0].x - offsetX) / scaleX) : (axisPoints[0].x - offsetX) / scaleX;
-    const xB = logX ? Math.pow(10, (axisPoints[1].x - offsetX) / scaleX) : (axisPoints[1].x - offsetX) / scaleX;
+    const toX = px => logX ? Math.pow(10, (px - offsetX) / scaleX) : (px - offsetX) / scaleX;
+    const toY = py => logY ? Math.pow(10, (py - offsetY) / scaleY) : (py - offsetY) / scaleY;
+    const xA = toX(axisPoints[0].x), xB = toX(axisPoints[1].x);
     const xMin = Math.min(xA, xB), xMax = Math.max(xA, xB);
-
     const yIdx0 = sharedOrigin.checked ? 0 : 2;
     const yIdx1 = sharedOrigin.checked ? 2 : 3;
-    const yA = logY ? Math.pow(10, (axisPoints[yIdx0].y - offsetY) / scaleY) : (axisPoints[yIdx0].y - offsetY) / scaleY;
-    const yB = logY ? Math.pow(10, (axisPoints[yIdx1].y - offsetY) / scaleY) : (axisPoints[yIdx1].y - offsetY) / scaleY;
+    const yA = toY(axisPoints[yIdx0].y), yB = toY(axisPoints[yIdx1].y);
     const yMin = Math.min(yA, yB), yMax = Math.max(yA, yB);
+    const xStep = (xMax - xMin) / 10, yStep = (yMax - yMin) / 10;
 
-    const xStep = (xMax - xMin) / 10;
-    const yStep = (yMax - yMin) / 10;
-
-    if (xStep > 0) {
-      for (let x = xMin; x <= xMax + xStep * 0.001; x += xStep) {
+    if (xStep > 0 && isFinite(xStep)) {
+      for (let i = 0; i <= 10; i++) {
+        const x = xMin + i * xStep;
         const px = logX ? Math.log10(x) * scaleX + offsetX : x * scaleX + offsetX;
-        ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, canvas.height); ctx.stroke();
+        c.beginPath(); c.moveTo(px, 0); c.lineTo(px, H); c.stroke();
       }
     }
-    if (yStep > 0) {
-      for (let y = yMin; y <= yMax + yStep * 0.001; y += yStep) {
+    if (yStep > 0 && isFinite(yStep)) {
+      for (let i = 0; i <= 10; i++) {
+        const y = yMin + i * yStep;
         const py = logY ? Math.log10(y) * scaleY + offsetY : y * scaleY + offsetY;
-        ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(canvas.width, py); ctx.stroke();
+        c.beginPath(); c.moveTo(0, py); c.lineTo(W, py); c.stroke();
       }
     }
   }
 
   // Axis points
-  ctx.fillStyle = 'red';
-  ctx.font = `${12 / zoom}px Arial`;
+  c.fillStyle = 'red';
+  c.font = `${12 / z}px Arial`;
   axisPoints.forEach((p, i) => {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 5 / zoom, 0, 2 * Math.PI);
-    ctx.fill();
-    ctx.fillText(p.label || axisLabels[i], p.x + 8 / zoom, p.y - 8 / zoom);
+    c.beginPath();
+    c.arc(p.x, p.y, 5 / z, 0, 2 * Math.PI);
+    c.fill();
+    c.fillText(p.label || axisLabels[i], p.x + 8 / z, p.y - 8 / z);
   });
 
   // Data points
   lines.forEach((line, lineIdx) => {
-    ctx.fillStyle = lineColors[lineIdx % lineColors.length];
+    c.fillStyle = lineColors[lineIdx % lineColors.length];
     line.points.forEach((p, i) => {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3 / zoom, 0, 2 * Math.PI);
+      c.beginPath();
+      c.arc(p.x, p.y, 3 / z, 0, 2 * Math.PI);
       if (lineIdx === currentLineIndex && i === selectedPointIndex) {
-        ctx.strokeStyle = 'yellow';
-        ctx.lineWidth   = 2 / zoom;
-        ctx.stroke();
+        c.strokeStyle = 'yellow';
+        c.lineWidth   = 2 / z;
+        c.stroke();
       }
-      ctx.fill();
+      c.fill();
     });
   });
 
   // Highlight path
   if (highlightPath.length > 1) {
-    ctx.strokeStyle = 'rgba(255, 80, 0, 0.7)';
-    ctx.lineWidth   = highlightWidth / zoom;
-    ctx.lineCap     = 'round';
-    ctx.lineJoin    = 'round';
-    ctx.beginPath();
-    ctx.moveTo(highlightPath[0].x, highlightPath[0].y);
-    for (let i = 1; i < highlightPath.length; i++) {
-      ctx.lineTo(highlightPath[i].x, highlightPath[i].y);
-    }
-    ctx.stroke();
+    c.strokeStyle = 'rgba(255, 80, 0, 0.7)';
+    c.lineWidth   = highlightWidth / z;
+    c.lineCap     = 'round';
+    c.lineJoin    = 'round';
+    c.beginPath();
+    c.moveTo(highlightPath[0].x, highlightPath[0].y);
+    for (let i = 1; i < highlightPath.length; i++) c.lineTo(highlightPath[i].x, highlightPath[i].y);
+    c.stroke();
   }
 
-  ctx.restore();
-}, 16);
+  c.restore();
+}
+
+function render() {
+  if (!viewW) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!hasImage()) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#ccc';
+    ctx.font = '16px Arial';
+    ctx.fillText('No image loaded. Please upload an image.', 20, 36);
+    return;
+  }
+
+  ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, dpr * panX, dpr * panY);
+  ctx.imageSmoothingEnabled = zoom < 2;   // crisp pixels when zoomed in
+  ctx.drawImage(enhancedCanvas, 0, 0);
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1 / zoom;
+  ctx.strokeRect(0, 0, imgW(), imgH());
+  drawOverlays(ctx, zoom, imgW(), imgH());
+}
+
+// Coalesce any number of draw() calls into one render per animation frame.
+let _drawQueued = false;
+function draw() {
+  if (_drawQueued) return;
+  _drawQueued = true;
+  requestAnimationFrame(() => { _drawQueued = false; render(); });
+}
 
 /**********************
  * MAGNIFIER
  **********************/
 const drawMagnifier = throttle((clientX, clientY) => {
-  if (!img.src || !img.complete || img.naturalWidth === 0 || mode === 'none' || isPanning) {
+  if (!hasImage() || (mode === 'none' && !pickingSnapColor) || isPanning || isPanDragging) {
     magnifier.style.display = 'none';
     return;
   }
-
   const rect   = canvas.getBoundingClientRect();
   const mouseX = clientX - rect.left;
   const mouseY = clientY - rect.top;
+  const magW = magnifier.width, magH = magnifier.height;
 
-  const magW = magnifier.width;
-  const magH = magnifier.height;
-  magnifier.style.left    = `${mouseX + 16}px`;
-  magnifier.style.top     = `${mouseY + 16}px`;
+  // Keep the magnifier inside the canvas area
+  let left = mouseX + 16, top = mouseY + 16;
+  if (left + magW + 4 > viewW) left = mouseX - 16 - magW;
+  if (top  + magH + 4 > viewH) top  = mouseY - 16 - magH;
+  magnifier.style.left    = `${Math.max(0, left)}px`;
+  magnifier.style.top     = `${Math.max(0, top)}px`;
   magnifier.style.display = 'block';
 
-  const { x, y } = imageToCanvasCoords(clientX, clientY);
-  const scaleToImg = img.naturalWidth / canvas.width;
-  const imgX = x * scaleToImg;
-  const imgY = y * (img.naturalHeight / canvas.height);
+  const { x, y } = imageToCanvasCoords(clientX, clientY); // image px
+  const mz = magnifierZoom;
+  const sw = magW / mz, sh = magH / mz;
+  const sx0 = x - sw / 2, sy0 = y - sh / 2;
 
-  const srcWidth  = magW / magnifierZoom;
-  const srcHeight = magH / magnifierZoom;
-  const srcCX     = imgX;
-  const srcCY     = imgY;
-
-  const clampedSrcX = Math.max(0, Math.min(srcCX - srcWidth  / 2, img.naturalWidth  - srcWidth));
-  const clampedSrcY = Math.max(0, Math.min(srcCY - srcHeight / 2, img.naturalHeight - srcHeight));
-
-  const destOffX = (clampedSrcX - (srcCX - srcWidth  / 2)) * magnifierZoom;
-  const destOffY = (clampedSrcY - (srcCY - srcHeight / 2)) * magnifierZoom;
-
+  magCtx.setTransform(1, 0, 0, 1, 0, 0);
   magCtx.clearRect(0, 0, magW, magH);
   magCtx.fillStyle = document.body.classList.contains('dark') ? '#222' : '#ddd';
   magCtx.fillRect(0, 0, magW, magH);
+  magCtx.imageSmoothingEnabled = mz < 3;
 
-  magCtx.filter = buildFilter();
-  try {
-    magCtx.drawImage(
-      img,
-      clampedSrcX, clampedSrcY,
-      Math.min(srcWidth,  img.naturalWidth),
-      Math.min(srcHeight, img.naturalHeight),
-      destOffX, destOffY,
-      Math.min(srcWidth,  img.naturalWidth)  * magnifierZoom,
-      Math.min(srcHeight, img.naturalHeight) * magnifierZoom
-    );
-  } catch (e) {
-    magnifier.style.display = 'none';
-    return;
+  const ix0 = Math.max(0, sx0), iy0 = Math.max(0, sy0);
+  const ix1 = Math.min(imgW(), sx0 + sw), iy1 = Math.min(imgH(), sy0 + sh);
+  if (ix1 > ix0 && iy1 > iy0) {
+    magCtx.drawImage(enhancedCanvas,
+      ix0, iy0, ix1 - ix0, iy1 - iy0,
+      (ix0 - sx0) * mz, (iy0 - sy0) * mz, (ix1 - ix0) * mz, (iy1 - iy0) * mz);
   }
-  magCtx.filter = 'none';
 
-  const toMagX = (cx) => ((cx * (img.naturalWidth  / canvas.width)  - srcCX) * magnifierZoom + magW / 2);
-  const toMagY = (cy) => ((cy * (img.naturalHeight / canvas.height) - srcCY) * magnifierZoom + magH / 2);
+  const toMagX = wx => (wx - x) * mz + magW / 2;
+  const toMagY = wy => (wy - y) * mz + magH / 2;
 
   if (highlightPath.length > 1) {
     magCtx.strokeStyle = 'rgba(255, 80, 0, 0.85)';
-    magCtx.lineWidth   = Math.max(1.5, highlightWidth * magnifierZoom * 0.5);
-    magCtx.lineCap     = 'round';
-    magCtx.lineJoin    = 'round';
+    magCtx.lineWidth   = Math.max(1.5, highlightWidth * mz * 0.5);
+    magCtx.lineCap = 'round'; magCtx.lineJoin = 'round';
     magCtx.beginPath();
     magCtx.moveTo(toMagX(highlightPath[0].x), toMagY(highlightPath[0].y));
-    for (let i = 1; i < highlightPath.length; i++) {
-      magCtx.lineTo(toMagX(highlightPath[i].x), toMagY(highlightPath[i].y));
-    }
+    for (let i = 1; i < highlightPath.length; i++) magCtx.lineTo(toMagX(highlightPath[i].x), toMagY(highlightPath[i].y));
     magCtx.stroke();
   }
 
-  magCtx.fillStyle = 'red';
   axisPoints.forEach((p, i) => {
     const mx = toMagX(p.x), my = toMagY(p.y);
+    magCtx.fillStyle = 'red';
     magCtx.beginPath(); magCtx.arc(mx, my, 5, 0, 2 * Math.PI); magCtx.fill();
     magCtx.fillStyle = 'white'; magCtx.font = '10px Arial';
     magCtx.fillText(axisLabels[i], mx + 7, my - 7);
-    magCtx.fillStyle = 'red';
   });
 
   lines.forEach((line, lineIdx) => {
@@ -854,6 +986,17 @@ function getCatmullRomPoint(t, p0, p1, p2, p3, tension = 0.5) {
  * CALIBRATION
  **********************/
 setAxesBtn.addEventListener('click', () => {
+  // Click again while active = cancel axis-setting mode
+  if (mode === 'axes') {
+    mode = 'none';
+    axisInputs.style.display = 'none';
+    axisInstruction.textContent = isCalibrated
+      ? 'Calibration complete. Select a mode to digitize.'
+      : 'Click "Set Axis Points" then enter values.';
+    updateButtonStates();
+    return;
+  }
+  setPickingSnapColor(false);
   axisPoints = [];
   mode = 'axes';
   axisInputs.style.display = 'block';
@@ -875,7 +1018,7 @@ sharedOrigin.addEventListener('change', () => {
       ? 'Click point for Shared Origin (X1/Y1) on the chart.'
       : `Click point for ${axisLabels[0]} on the chart.`;
     calibrateBtn.disabled = true;
-    draw(); saveState(); saveSession();
+    draw(); saveState();
   }
 });
 
@@ -889,7 +1032,8 @@ resetAxisPointsBtn.addEventListener('click', () => {
     : `Click point for ${axisLabels[0]} on the chart.`;
   calibrateBtn.disabled = true;
   highlightControls.style.display = 'none';
-  draw(); saveState(); saveSession();
+  updateButtonStates();
+  draw(); saveState();
 });
 
 calibrateBtn.addEventListener('click', () => {
@@ -939,7 +1083,7 @@ calibrateBtn.addEventListener('click', () => {
     const dc = canvasToDataCoords(p.x, p.y);
     if (dc) { p.dataX = dc.dataX; p.dataY = dc.dataY; }
   }));
-  saveState(); saveSession(); draw(); updatePreview();
+  saveState(); draw(); updatePreview();
 });
 
 resetCalibrationBtn.addEventListener('click', () => {
@@ -949,63 +1093,62 @@ resetCalibrationBtn.addEventListener('click', () => {
   mode = 'none';
   axisInstruction.textContent = 'Click "Set Axis Points" then enter values.';
   axisInputs.style.display    = 'none';
+  highlightControls.style.display = 'none';
   _applyCalibrationButtonState();
   updateButtonStates();
-  draw(); saveState(); saveSession();
+  draw(); saveState();
 });
 
 toggleGridBtn.addEventListener('click', () => {
   showGrid = !showGrid;
-  draw(); saveState(); saveSession();
+  updateButtonStates();
+  draw(); saveState();
 });
 
-/**
- * FIX #2: toggleLogX/Y — guard against accessing axisPoints before they exist.
- */
 toggleLogXBtn.addEventListener('click', () => {
   logX = !logX;
-  toggleLogXBtn.classList.toggle('log-active', logX);
   if (isCalibrated && axisPoints.length >= 2) {
-    const x1Val    = parseFloat(document.getElementById('x1-value').value);
-    const x2Val    = parseFloat(document.getElementById('x2-value').value);
-    if (logX && (x1Val <= 0 || x2Val <= 0)) {
+    const x1Val = parseFloat(document.getElementById('x1-value').value);
+    const x2Val = parseFloat(document.getElementById('x2-value').value);
+    if (logX && (x1Val <= 0 || x2Val <= 0 || isNaN(x1Val) || isNaN(x2Val))) {
       showModal('Log X requires positive X1, X2 values. Reverting.');
       logX = false;
-      toggleLogXBtn.classList.remove('log-active');
+      updateButtonStates();
       return;
     }
     const deltaPixX = axisPoints[1].x - axisPoints[0].x;
     const deltaValX = logX ? Math.log10(x2Val) - Math.log10(x1Val) : x2Val - x1Val;
-    if (deltaValX === 0) return;
+    if (deltaValX === 0 || !isFinite(deltaValX)) { logX = !logX; updateButtonStates(); return; }
     scaleX  = deltaPixX / deltaValX;
     offsetX = logX ? axisPoints[0].x - Math.log10(x1Val) * scaleX : axisPoints[0].x - x1Val * scaleX;
     lines.forEach(l => l.points.forEach(p => { const d = canvasToDataCoords(p.x, p.y); if (d) p.dataX = d.dataX; }));
-    updatePreview(); draw(); saveState(); saveSession();
+    updatePreview(); draw(); saveState();
   }
+  updateButtonStates();
 });
 
 toggleLogYBtn.addEventListener('click', () => {
   logY = !logY;
-  toggleLogYBtn.classList.toggle('log-active', logY);
   const yIdx0 = sharedOrigin.checked ? 0 : 2;
   const yIdx1 = sharedOrigin.checked ? 2 : 3;
   if (isCalibrated && axisPoints.length > yIdx1) {
-    const y1Val    = parseFloat(document.getElementById('y1-value').value);
-    const y2Val    = parseFloat(document.getElementById('y2-value').value);
-    if (logY && (y1Val <= 0 || y2Val <= 0)) {
+    const y1Val = parseFloat(document.getElementById('y1-value').value);
+    const y2Val = parseFloat(document.getElementById('y2-value').value);
+    if (logY && (y1Val <= 0 || y2Val <= 0 || isNaN(y1Val) || isNaN(y2Val))) {
       showModal('Log Y requires positive Y1, Y2 values. Reverting.');
       logY = false;
-      toggleLogYBtn.classList.remove('log-active');
+      updateButtonStates();
       return;
     }
     const deltaPixY = axisPoints[yIdx1].y - axisPoints[yIdx0].y;
     const deltaValY = logY ? Math.log10(y2Val) - Math.log10(y1Val) : y2Val - y1Val;
-    if (deltaValY === 0) return;
+    if (deltaValY === 0 || !isFinite(deltaValY)) { logY = !logY; updateButtonStates(); return; }
     scaleY  = deltaPixY / deltaValY;
     offsetY = logY ? axisPoints[yIdx0].y - Math.log10(y1Val) * scaleY : axisPoints[yIdx0].y - y1Val * scaleY;
     lines.forEach(l => l.points.forEach(p => { const d = canvasToDataCoords(p.x, p.y); if (d) p.dataY = d.dataY; }));
-    updatePreview(); draw(); saveState(); saveSession();
+    updatePreview(); draw(); saveState();
   }
+  updateButtonStates();
 });
 
 /**********************
@@ -1014,48 +1157,78 @@ toggleLogYBtn.addEventListener('click', () => {
 brightnessSlider.addEventListener('input', e => {
   brightnessVal = parseFloat(e.target.value);
   document.getElementById('brightness-val').textContent = brightnessVal + '%';
-  buildProcessedImageData();
-  draw(); saveSession();
+  scheduleEnhance(); saveSession();
 });
 
 contrastSlider.addEventListener('input', e => {
   contrastVal = parseFloat(e.target.value);
   document.getElementById('contrast-val').textContent = contrastVal + '%';
-  buildProcessedImageData();
-  draw(); saveSession();
+  scheduleEnhance(); saveSession();
 });
+
+gridFilterToggle.addEventListener('change', () => {
+  gridFilterOn = gridFilterToggle.checked;
+  scheduleEnhance(); saveSession();
+});
+
+/* ---- Snap settings ---- */
+function enableSnap() {
+  snapToLine = true;
+  snapToggle.checked = true;
+}
 
 snapToggle.addEventListener('change', () => {
   snapToLine = snapToggle.checked;
   saveSession();
 });
 
-gridFilterToggle.addEventListener('change', () => {
-  gridFilterOn = gridFilterToggle.checked;
-  buildProcessedImageData();
-  draw(); saveSession();
+snapModeSelect.addEventListener('change', () => {
+  snapColorMode = snapModeSelect.value;
+  if (snapColorMode === 'custom') enableSnap();
+  setPickingSnapColor(false);
+  saveSession();
+});
+
+snapColorInput.addEventListener('input', () => {
+  snapColor = snapColorInput.value;
+  enableSnap();
+  saveSession();
+});
+
+snapTolSlider.addEventListener('input', () => {
+  snapTolerance = parseInt(snapTolSlider.value, 10);
+  document.getElementById('snap-tol-val').textContent = snapTolerance;
+  saveSession();
+});
+
+snapPickBtn.addEventListener('click', () => {
+  if (!hasImage()) { showModal('Load an image first.'); return; }
+  setPickingSnapColor(!pickingSnapColor);
+  statusBar.textContent = pickingSnapColor ? 'Color detection: hover over the graph, click to use the color (Esc to cancel).' : `Mode: ${mode}`;
 });
 
 /**********************
  * VIEW CONTROLS
  **********************/
-document.getElementById('zoom-in').onclick    = () => { zoom *= 1.2; draw(); saveSession(); };
-document.getElementById('zoom-out').onclick   = () => { zoom /= 1.2; draw(); saveSession(); };
-document.getElementById('reset-view').onclick = () => { zoom = 1; panX = 0; panY = 0; draw(); saveSession(); };
-document.getElementById('pan-mode').onclick   = () => {
+document.getElementById('zoom-in').onclick    = () => zoomAt(1.25);
+document.getElementById('zoom-out').onclick   = () => zoomAt(1 / 1.25);
+document.getElementById('reset-view').onclick = () => { fitView(); draw(); saveSession(); };
+
+panModeBtn.onclick = () => {
   isPanning = !isPanning;
-  canvas.style.cursor = isPanning ? 'move' : 'default';
-  saveSession();
+  if (isPanning) magnifier.style.display = 'none';
+  updateButtonStates();
 };
-document.getElementById('toggle-theme').onclick = () => {
+
+toggleThemeBtn.onclick = () => {
   document.body.classList.toggle('dark');
   localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+  updateButtonStates();
 };
 
 document.getElementById('magnifier-zoom').addEventListener('input', e => {
-  magnifierZoom = parseFloat(e.target.value);
-  if (magnifierZoom < 1) magnifierZoom = 1;
-  saveSession(); draw();
+  magnifierZoom = Math.max(1, parseFloat(e.target.value));
+  saveSession();
 });
 
 document.getElementById('highlight-width').addEventListener('input', e => {
@@ -1064,68 +1237,68 @@ document.getElementById('highlight-width').addEventListener('input', e => {
 });
 
 /**********************
- * PANNING
+ * PANNING (window-level so dragging outside the canvas keeps working)
  **********************/
-canvas.addEventListener('mousemove', e => {
-  if (isPanDragging && e.buttons === 1) {
-    panX = e.clientX - startPan.x;
-    panY = e.clientY - startPan.y;
-    draw();
+window.addEventListener('mousemove', e => {
+  if (!isPanDragging) return;
+  panX = e.clientX - startPan.x;
+  panY = e.clientY - startPan.y;
+  draw();
+});
+
+window.addEventListener('mouseup', () => {
+  if (isPanDragging) {
+    isPanDragging = false;
+    updateButtonStates();
+    saveSession();
   }
 });
 
-canvas.addEventListener('mouseout', () => { magnifier.style.display = 'none'; });
 canvas.addEventListener('mouseleave', () => {
   magnifier.style.display = 'none';
-  statusBar.textContent   = `Mode: ${mode}`;
+  colorTip.style.display = 'none';
+  statusBar.textContent   = `Mode: ${isPanning ? 'pan' : mode}`;
 });
-canvas.addEventListener('mouseup', () => { isPanDragging = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-// Scroll-wheel zoom anchored to cursor position
+// Scroll-wheel zoom anchored to cursor
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
-  const rect   = canvas.getBoundingClientRect();
-  const mouseX = e.clientX - rect.left;
-  const mouseY = e.clientY - rect.top;
-
-  const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-  panX = mouseX - factor * (mouseX - panX);
-  panY = mouseY - factor * (mouseY - panY);
-  zoom *= factor;
-  draw(); saveSession();
+  const rect = canvas.getBoundingClientRect();
+  zoomAt(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - rect.left, e.clientY - rect.top);
 }, { passive: false });
 
 /**********************
  * KEYBOARD SHORTCUTS
  **********************/
 document.addEventListener('keydown', e => {
-  if (e.ctrlKey && e.key === 'z') { undoBtn.click(); e.preventDefault(); }
-  if (e.ctrlKey && e.key === 'y') { redoBtn.click(); e.preventDefault(); }
-  if (e.key === '+') { zoom *= 1.2; draw(); saveSession(); }
-  if (e.key === '-') { zoom /= 1.2; draw(); saveSession(); }
-  if (e.key === '0') { zoom = 1; panX = 0; panY = 0; draw(); saveSession(); }
+  if (e.key === 'Escape' && pickingSnapColor) {
+    setPickingSnapColor(false);
+    statusBar.textContent = `Mode: ${mode}`;
+    return;
+  }
+  const t = e.target;
+  const typing = t && (t.tagName === 'INPUT' && !['checkbox', 'range', 'color'].includes(t.type) || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+  if (typing) return;   // never hijack keys while typing in a field
+
+  if (e.ctrlKey && e.key === 'z') { undoBtn.click(); e.preventDefault(); return; }
+  if (e.ctrlKey && e.key === 'y') { redoBtn.click(); e.preventDefault(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === '+' || e.key === '=') zoomAt(1.25);
+  if (e.key === '-') zoomAt(1 / 1.25);
+  if (e.key === '0') { fitView(); draw(); saveSession(); }
   if (e.key === 'p' && isCalibrated) addPointBtn.click();
   if (e.key === 'h' && isCalibrated) highlightLineBtn.click();
-});
-
-/**********************
- * WINDOW RESIZE
- **********************/
-window.addEventListener('resize', () => {
-  if (img.src && img.complete && img.naturalWidth > 0) {
-    canvas.width  = Math.min(img.naturalWidth,  window.innerWidth * 0.75);
-    canvas.height = canvas.width * (img.naturalHeight / img.naturalWidth);
-    draw();
-  }
 });
 
 /**********************
  * INITIALIZATION
  **********************/
 document.addEventListener('DOMContentLoaded', () => {
+  if (localStorage.getItem('theme') === 'dark') document.body.classList.add('dark');
+  resizeCanvas(false);
   loadSession();
-  const savedTheme = localStorage.getItem('theme');
-  if (savedTheme === 'dark') document.body.classList.add('dark');
+  syncSnapUI();
+  updateButtonStates();
   draw();
 });
