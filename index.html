@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Graph Digitizer Pro</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="container">
+    <div id="canvas-container">
+      <canvas id="canvas"></canvas>
+      <canvas id="magnifier" width="120" height="120"></canvas>
+      <div id="pick-banner">🧪 Color detection ON — hover over the graph, <b>click</b> to use the color, <b>Esc</b> to cancel</div>
+      <div id="color-tip"><span class="swatch"></span><span class="tip-text"></span></div>
+      <div id="status-bar"></div>
+    </div>
+
+    <div id="controls" aria-label="Controls Panel">
+      <h3>Graph Digitizer Pro</h3>
+      <input type="file" id="image-upload" accept="image/*" title="Upload graph image">
+
+      <!-- VIEW -->
+      <details open>
+        <summary>View</summary>
+        <button id="zoom-in"      title="Zoom In (+)">Zoom In</button>
+        <button id="zoom-out"     title="Zoom Out (-)">Zoom Out</button>
+        <button id="reset-view"   title="Reset View (0)">Reset View</button>
+        <button id="pan-mode"     title="Toggle Pan Mode">Toggle Pan</button>
+        <button id="toggle-theme" title="Toggle Dark/Light Mode">Toggle Dark Mode</button>
+        <p>Magnifier Zoom:
+          <input type="range" id="magnifier-zoom" min="1" max="10" step="0.5" value="2" title="Magnifier zoom level">
+        </p>
+      </details>
+
+      <!-- CALIBRATION -->
+      <details open>
+        <summary>Calibration</summary>
+        <p id="axis-instruction">Click "Set Axis Points" then enter values.</p>
+        <button id="set-axes"          title="Start axis calibration">Set Axis Points</button>
+        <button id="reset-axis-points" title="Reset axis points">Reset Axis Points</button>
+        <div id="axis-inputs">
+          <p class="checkbox-container">
+            <input type="checkbox" id="shared-origin" title="Use same point for X1 and Y1">
+            <label for="shared-origin">Shared Origin (X1/Y1)</label>
+          </p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="orthogonal-axes" title="Enforce orthogonal axis snapping">
+            <label for="orthogonal-axes">Orthogonal Axes</label>
+          </p>
+          <!-- FIX #1: Use proper <label> elements so updateAxisLabels() can target them -->
+          <p><label for="x1-value">X1:</label> <input type="number" id="x1-value" step="any"></p>
+          <p><label for="x2-value">X2:</label> <input type="number" id="x2-value" step="any"></p>
+          <p><label for="y1-value">Y1:</label> <input type="number" id="y1-value" step="any"></p>
+          <p><label for="y2-value">Y2:</label> <input type="number" id="y2-value" step="any"></p>
+          <button id="calibrate" title="Apply calibration" disabled>Calibrate</button>
+        </div>
+        <button id="reset-calibration" title="Clear calibration">Reset Calibration</button>
+        <button id="toggle-grid"       title="Show/hide overlay grid">Toggle Grid</button>
+        <button id="toggle-log-x"      title="Toggle X-axis log scale">Toggle Log Scale (X)</button>
+        <button id="toggle-log-y"      title="Toggle Y-axis log scale">Toggle Log Scale (Y)</button>
+        <button id="toggle-date-x"     title="Treat the X axis as dates (start / finish date)">Toggle Date (X)</button>
+        <div id="date-x-options" style="display:none;">
+          <p class="inline-row"><label for="date-unit-x">X data point =</label>
+            <select id="date-unit-x" title="Round every X value to the nearest day, month or year">
+              <option value="day">Day</option><option value="month">Month</option><option value="year">Year</option>
+            </select></p>
+        </div>
+        <button id="toggle-date-y"     title="Treat the Y axis as dates (start / finish date)">Toggle Date (Y)</button>
+        <div id="date-y-options" style="display:none;">
+          <p class="inline-row"><label for="date-unit-y">Y data point =</label>
+            <select id="date-unit-y" title="Round every Y value to the nearest day, month or year">
+              <option value="day">Day</option><option value="month">Month</option><option value="year">Year</option>
+            </select></p>
+        </div>
+      </details>
+
+      <!-- IMAGE ENHANCEMENTS -->
+      <details open>
+        <summary>✨ Image Enhancements</summary>
+
+        <p class="slider-row">
+          <label>Brightness: <span id="brightness-val">100%</span></label>
+          <input type="range" id="brightness-slider" min="10" max="300" value="100" title="Adjust image brightness">
+        </p>
+
+        <p class="slider-row">
+          <label>Contrast: <span id="contrast-val">100%</span></label>
+          <input type="range" id="contrast-slider" min="10" max="400" value="100" title="Adjust image contrast">
+        </p>
+
+      </details>
+
+
+      <!-- AUTOMATIC CURVE AND SCATTER DETECTOR -->
+      <details open>
+        <summary>Curve / Scatter Detector</summary>
+        <p class="tool-hint">Detect separate curve components or scatter markers. Results are listed below so you can name and color each dataset before adding it.</p>
+        <p><label for="cd-mode">Detection type:</label>
+          <select id="cd-mode">
+            <option value="curves">Separate curve components</option>
+            <option value="scatter">Scatter markers (one dataset)</option>
+          </select>
+        </p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-suppress-lines" checked><label for="cd-suppress-lines">Suppress long horizontal / vertical lines</label></p>
+        <p class="slider-row"><label>Line suppression threshold: <span id="cd-run-val">18%</span></label><input type="range" id="cd-run" min="8" max="35" value="18"></p>
+        <p class="slider-row"><label>Foreground sensitivity: <span id="cd-sensitivity-val">Medium</span></label><input type="range" id="cd-sensitivity" min="1" max="3" value="2"></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-split-colors" checked title="Curve mode: split lines of different colors even when they cross or touch"><label for="cd-split-colors">Separate curves by color</label></p>
+        <p class="slider-row"><label>Color separation distance: <span id="cd-split-val">60</span></label><input type="range" id="cd-split-dist" min="20" max="150" value="60" title="Lower = treats similar colors as different lines. Higher = merges similar colors."></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-ignore-gray" checked title="Curve mode: drop light gray / low-saturation colors (typical grid lines, axes shading). Untick if your curve itself is gray."><label for="cd-ignore-gray">Ignore gray (grid-like) colors</label></p>
+        <p class="slider-row"><label>Minimum curve width: <span id="cd-minw-val">15</span>% of plot</label><input type="range" id="cd-minw" min="1" max="80" value="15" title="Drops short fragments such as text, ticks and legend samples"></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-limit-bounds" checked title="Ignore everything outside the rectangle spanned by your axis points (titles, legends, labels)"><label for="cd-limit-bounds">Only search inside the axis-point area</label></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-filter-color"><label for="cd-filter-color">Detect only a selected color</label></p>
+        <p class="inline-row"><label for="cd-color">Target color:</label><input type="color" id="cd-color" value="#ff0000" title="Color to detect"><span id="cd-color-chip" class="swatch" style="background:#ff0000" aria-label="Selected target color"></span></p>
+        <button id="cd-pick-color" type="button" title="Click, then click a color on the graph to sample it">🧪 Pick color from graph</button>
+        <p class="tool-hint" id="cd-pick-help">Choose a target color with the color square or sample one directly from the graph.</p>
+        <p class="slider-row"><label>Color tolerance: <span id="cd-tol-val">55</span></label><input type="range" id="cd-tol" min="5" max="220" value="55"></p>
+        <p>Minimum component size (pixels): <input type="number" id="cd-min-size" min="1" max="100000" value="35"></p>
+        <p><label id="cd-points-label" for="cd-points">Points per curve / dataset:</label> <input type="number" id="cd-points" min="2" max="5000" value="100"></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-preview" checked><label for="cd-preview">Preview detected components</label></p>
+        <button id="cd-detect" class="holographic" disabled>Detect Curves / Markers</button>
+        <button id="cd-add-results" disabled>Add Named Datasets</button>
+        <button id="cd-clear-preview">Clear Detector Preview</button>
+        <div id="cd-results" class="cd-results" aria-live="polite"></div>
+        <p id="cd-status" class="tool-hint" role="status">Upload an image and calibrate axes to detect curves.</p>
+      </details>
+
+      <!-- POINT ACTIONS -->
+      <details open>
+        <summary>Point Actions</summary>
+        <button id="add-point"    title="Click canvas to add a point (P)" disabled>Add Point</button>
+        <button id="adjust-point" title="Drag a point to reposition it"   disabled>Adjust Point</button>
+        <button id="delete-point" title="Click a point to delete it"       disabled>Delete Point</button>
+
+        <button id="highlight-line" class="holographic" title="Hold left-click and drag to trace a curve (H)" disabled>
+          Highlight Line
+        </button>
+        <div id="highlight-controls">
+          <p>Line Name: <input type="text" id="highlight-line-name" placeholder="Enter line name"></p>
+          <p>Points (n): <input type="number" id="n-points" value="20" min="2"></p>
+          <p>Brush Width: <input type="range" id="highlight-width" min="1" max="20" value="3"></p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="auto-trace-toggle" checked
+              title="After tracing, detect line color from path and snap all points to nearest matching pixel — ignores grid lines">
+            <label for="auto-trace-toggle">🎯 Auto-Trace (color snap)</label>
+          </p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="grid-filter-toggle" title="Highlight mode only: suppress background grid lines (the image is filtered while Highlight Line is active, and auto-trace samples the filtered image)">
+            <label for="grid-filter-toggle">Grid Filter (suppress grids)</label>
+          </p>
+
+          <p class="checkbox-container">
+            <input type="checkbox" id="snap-toggle" title="Highlight mode only: snap traced points to the nearest matching pixel (line) within a small radius">
+            <label for="snap-toggle">🧲 Snap to Pixel (Magnet)</label>
+          </p>
+
+          <div id="snap-options">
+            <p class="inline-row">
+              <label for="snap-mode">Snap to:</label>
+              <select id="snap-mode" title="What the magnet should snap to">
+                <option value="dark">Dark pixels (default)</option>
+                <option value="custom">Chosen color</option>
+              </select>
+            </p>
+            <div id="snap-custom-options" style="display:none;">
+              <p class="inline-row">
+                <label for="snap-color">Color:</label>
+                <input type="color" id="snap-color" value="#ff0000" title="Click the square to choose the color to snap to">
+                <button id="snap-pick" title="Eyedropper: hover over the graph to preview a color, click to use it (Esc cancels)">🧪 Detect color</button>
+              </p>
+              <p class="inline-row" id="snap-live-row">
+                <span id="snap-live" class="swatch" title="Color under the pointer while detecting"></span>
+                <span id="snap-live-hex">Hover over the graph while detecting…</span>
+              </p>
+              <p class="slider-row">
+                <label>Tolerance: <span id="snap-tol-val">60</span></label>
+                <input type="range" id="snap-tol" min="5" max="200" value="60" title="Higher = accepts colors further from the chosen one">
+              </p>
+            </div>
+          </div>
+
+          <button id="delete-highlight" title="Clear the current highlight path">Delete Highlight</button>
+        </div>
+
+        <button id="clear-points" title="Clear all points in current line" disabled>Clear Points</button>
+        <button id="sort-points"  title="Sort points by X coordinate"      disabled>Sort Points (X)</button>
+      </details>
+
+      <!-- LINE MANAGEMENT -->
+      <details open>
+        <summary>Line Management</summary>
+        <button id="new-line"    title="Create a new data line" disabled>New Line</button>
+        <button id="rename-line" title="Rename the current line" disabled>Rename Line</button>
+        <select id="line-select" title="Select active line"></select>
+      </details>
+
+      <!-- DATA -->
+      <details open>
+        <summary>Data</summary>
+        <input type="file" id="import-json-input" accept=".json" style="display:none">
+        <button id="import-json"  title="Import JSON session">Import JSON</button>
+        <button id="export-json"  title="Export data as JSON">Export JSON</button>
+        <button id="export-csv"   title="Export data as CSV">Export CSV</button>
+        <button id="export-xlsx"  title="Export data as Excel">Export XLSX</button>
+        <button id="export-image" title="Export canvas as PNG">Export Image</button>
+        <button id="clear-session" title="Clear all data and calibration">Clear Session</button>
+      </details>
+
+      <!-- PREVIEW -->
+      <details>
+        <summary>Preview Data</summary>
+        <div style="max-height:200px;overflow-y:auto;">
+          <table id="preview-table"></table>
+        </div>
+      </details>
+
+      <!-- HISTORY -->
+      <details open>
+        <summary>History</summary>
+        <button id="undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button id="redo" title="Redo (Ctrl+Y)" disabled>Redo</button>
+      </details>
+
+      <!-- POINT LIST -->
+      <details open>
+        <summary>Points (current line)</summary>
+        <div id="point-list"></div>
+      </details>
+    </div>
+  </div>
+
+  <div id="modal"><div id="modal-content"></div></div>
+  <div id="spinner">Processing…</div>
+
+  <!-- Core must load first: state, drawing, calibration, session -->
+  <script src="digitizer-core.js"></script>
+  <!-- Tools: interactions, auto-trace, snap, export -->
+  <script src="digitizer-tools.js"></script>
+  <script src="digitizer-curve-detector.js"></script>
+</body>
+</html>
