@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Graph Digitizer Pro</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>#controls{flex:0 0 300px;width:300px;padding:0 12px 12px}
+#controls h3{margin:12px 0 8px}
+#steps{position:sticky;top:0;z-index:3;display:flex;gap:4px;padding:8px 0;margin-bottom:8px;background:#f4f4f4}
+body.dark #steps{background:#2a2a2a}
+#steps button{flex:1;margin:0;padding:7px 4px;display:flex;align-items:center;justify-content:center;gap:5px;font-weight:600}
+#steps button b{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;background:#999;color:#fff;font-size:10px}
+#steps button.on{background:#2563eb!important;color:#fff!important;border-color:#1d4ed8!important}
+#steps button.on b{background:#fff;color:#2563eb}
+#ok-setup:not(:empty){color:#16a34a;font-style:normal}
+#steps button.on #ok-setup{color:#bbf7d0}
+.tab-pane{display:none}.tab-pane.on{display:block}
+.tab-pane h4{margin:12px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#777}
+.btn-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:4px 0}
+.btn-grid button{margin:0}
+.line-bar{display:grid;grid-template-columns:1fr auto auto;gap:4px;margin:4px 0}
+.line-bar>*{margin:0;width:auto}.line-bar select{min-width:0}
+#proxy-src{display:none}
+button.primary,#controls button.holographic{background:#2563eb!important;color:#fff!important;border-color:#1d4ed8!important;animation:none!important;font-weight:600}
+button.primary:hover:not(:disabled),#controls button.holographic:hover:not(:disabled){background:#1d4ed8!important}
+#controls button.holographic.active{background:#6c757d!important;border-color:#495057!important}
+button.danger{color:#b91c1c;border-color:#fca5a5}
+body.dark .tab-pane h4{color:#aaa}
+#calib-warn{display:none;background:#fef3c7;color:#92400e}
+body.dark #calib-warn{background:#422006;color:#fcd34d}
+#toolbar{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);display:flex;align-items:center;gap:3px;padding:5px;background:rgba(30,30,30,.92);border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.5);z-index:8;max-width:calc(100% - 16px);overflow-x:auto}
+#toolbar button{margin:0;width:46px;padding:4px 0;display:flex;flex-direction:column;align-items:center;gap:1px;background:transparent;color:#eee;border:1px solid transparent;font-size:17px;line-height:1.1}
+#toolbar button small{font-size:9px;opacity:.75}
+#toolbar button:hover:not(:disabled){background:#444}
+#toolbar button.active{background:#2563eb!important;border-color:#60a5fa!important;box-shadow:none}
+#toolbar i{width:1px;height:28px;background:#555;margin:0 3px}
+#mode-hint{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);padding:4px 12px;border-radius:14px;background:rgba(37,99,235,.92);color:#fff;font-size:12px;z-index:8;pointer-events:none;white-space:nowrap;display:none}
+</style>
+
+  <style id="ui-refresh">
+    :root{color-scheme:dark;--bg:#080d18;--panel:#101827;--panel-2:#172235;--ink:#f4f7ff;--muted:#c0cce0;--line:#2b3a51;--accent:#818cf8;--accent2:#6366f1;--accent-soft:#292d55;--good:#34d399;--danger:#f87171;--shadow:0 12px 32px #0006}
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    body{overflow:hidden}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer;transition:background .16s,border-color .16s,transform .16s,box-shadow .16s}
+    button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #a5b4fc;outline-offset:2px}
+    button:disabled{opacity:.42;cursor:not-allowed;transform:none!important}
+    #container{height:100dvh;min-height:540px;display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:0;padding:14px;max-width:1900px;margin:auto}
+    #canvas-container{position:relative;min-width:0;min-height:0;overflow:hidden;background:#fff;border:1px solid #dce4ef;border-radius:20px;box-shadow:var(--shadow);isolation:isolate}
+    #canvas{display:block;width:100%;height:100%;touch-action:none}
+    #controls{width:auto!important;flex:none!important;min-width:0;overflow:auto;overscroll-behavior:contain;background:var(--panel);border:1px solid var(--line);border-left:0;border-radius:0 20px 20px 0;padding:18px 18px 28px!important;scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent}
+    #controls h3{font-size:21px;letter-spacing:-.035em;line-height:1.2;margin:2px 0 5px!important;font-weight:800}
+    #controls h3:after{content:"IMAGE → DATA";display:block;color:var(--muted);font-size:10px;letter-spacing:.16em;font-weight:800;margin-top:7px}
+    #steps{position:sticky;top:-18px;z-index:10;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:12px 0 14px;margin:0 0 8px;background:var(--panel);border-bottom:1px solid var(--line)}
+    #steps button{min-width:0;border:1px solid transparent!important;border-radius:11px;background:var(--panel-2)!important;color:var(--muted)!important;padding:9px 5px!important;font-size:12px;font-weight:750;gap:5px}
+    #steps button b{width:20px;height:20px;background:#e2e8f0;color:#475569;font-size:10px}
+    #steps button.on{background:var(--accent-soft)!important;color:var(--accent)!important;border-color:#c7d2fe!important}
+    #steps button.on b{background:var(--accent);color:white}
+    #ok-setup:not(:empty){color:var(--good);font-style:normal}
+    #steps button.on #ok-setup{color:var(--accent)}
+    .tab-pane{display:none}.tab-pane.on{display:block;animation:fade-in .18s ease-out}
+    @keyframes fade-in{from{opacity:.65;transform:translateY(3px)}to{opacity:1;transform:none}}
+    #controls h4{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:#64748b;margin:22px 0 9px;font-weight:850}
+    #controls p{margin:9px 0}
+    #controls label{font-size:12px;font-weight:650;color:#334155}
+    #controls input:not([type=checkbox]):not([type=range]):not([type=color]):not([type=file]),#controls select,#controls textarea{width:100%;min-width:0;border:1px solid #d7dfeb;border-radius:9px;background:#fff;color:#172033;padding:9px 10px;min-height:37px}
+    #controls input[type=number]{font-variant-numeric:tabular-nums}
+    #controls input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px;vertical-align:middle}
+    #controls input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer}
+    #controls input[type=color]{width:36px;height:34px;padding:3px;border:1px solid var(--line);border-radius:8px;background:#fff;vertical-align:middle}
+    #controls input[type=file]{width:100%;font-size:12px;color:var(--muted);padding:12px;border:1px dashed #cbd5e1;border-radius:12px;background:var(--panel-2);margin:6px 0 10px}
+    #controls input[type=file]::file-selector-button{border:0;border-radius:7px;background:var(--accent-soft);color:var(--accent);font-weight:750;padding:7px 10px;margin-right:8px;cursor:pointer}
+    #controls button{border:1px solid #dbe2ec;background:#fff;color:#334155;border-radius:9px;padding:9px 11px;font-size:12px;font-weight:750;min-height:36px}
+    #controls button:hover:not(:disabled){border-color:#a5b4fc;background:#f8faff;box-shadow:0 3px 8px #312e8110}
+    #controls button.primary,#controls button.holographic{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;box-shadow:0 4px 10px #4f46e526}
+    #controls button.primary:hover:not(:disabled),#controls button.holographic:hover:not(:disabled){background:var(--accent2)!important}
+    #controls button.danger{color:var(--danger);border-color:#fecaca;background:#fff7f7}
+    .btn-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:8px 0}
+    .btn-grid button{margin:0;min-width:0}
+    .line-bar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;margin:8px 0}
+    .line-bar>*{margin:0;width:auto!important;min-width:0}
+    #controls details{border:1px solid var(--line);border-radius:12px;background:#fff;margin:9px 0;overflow:hidden}
+    #controls details[open]{box-shadow:0 2px 8px rgba(15,23,42,.025)}
+    #controls summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;padding:12px 13px;font-size:12px;font-weight:800;color:#253149;background:var(--panel-2);user-select:none}
+    #controls summary::-webkit-details-marker{display:none}
+    #controls summary:after{content:"＋";margin-left:auto;color:#94a3b8;font-size:16px;font-weight:500}
+    #controls details[open]>summary:after{content:"−"}
+    #controls details>*:not(summary){margin-left:12px;margin-right:12px}
+    #controls details>p:first-of-type{margin-top:13px}
+    #controls details>p:last-child{margin-bottom:13px}
+    .checkbox-container{display:flex;align-items:flex-start;gap:8px}
+    .checkbox-container label{flex:1}
+    .inline-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .inline-row>*{min-width:0}
+    .inline-row label{flex:0 0 auto}
+    .slider-row{padding:4px 0}
+    .slider-row label{display:flex;justify-content:space-between;gap:10px;margin-bottom:4px}
+    .slider-row label span{color:var(--accent);font-variant-numeric:tabular-nums}
+    .tool-hint,#axis-instruction{font-size:11px!important;line-height:1.55;color:var(--muted);background:#f8fafc;padding:9px 10px;border-radius:8px}
+    #calib-warn{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+    #toolbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:3px;padding:7px;background:rgba(15,23,42,.92);border:1px solid #ffffff24;border-radius:14px;box-shadow:0 12px 30px #0f172a30;backdrop-filter:blur(12px);z-index:8;max-width:calc(100% - 24px);overflow-x:auto}
+    #toolbar button{flex:0 0 48px;margin:0;width:48px;min-height:45px;padding:5px 0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:transparent;color:#e2e8f0;border:1px solid transparent;font-size:19px;line-height:1;border-radius:9px}
+    #toolbar button small{font-size:9px;opacity:.8;font-weight:650}
+    #toolbar button:hover:not(:disabled){background:#334155;box-shadow:none}
+    #toolbar button.active{background:#4f46e5!important;border-color:#818cf8!important;box-shadow:none}
+    #toolbar i{width:1px;height:27px;background:#475569;margin:0 3px;flex:0 0 1px}
+    #mode-hint{position:absolute;left:50%;bottom:82px;transform:translateX(-50%);padding:7px 13px;border-radius:99px;background:#312e81;color:#fff;font-size:11px;font-weight:750;z-index:8;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px #312e8130}
+    #pick-banner{border-radius:10px!important;box-shadow:0 6px 24px #0f172a20}
+    #status-bar{font-size:11px}
+    #modal{backdrop-filter:blur(5px)}
+    #modal-content{border-radius:16px!important;box-shadow:0 24px 80px #0f172a35!important}
+    #spinner{border-radius:12px!important;box-shadow:var(--shadow)}
+    #point-list{display:grid;gap:5px}
+    #point-list>*{border-radius:8px}
+    #preview-table{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
+    #preview-table th,#preview-table td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right}
+    #preview-table th{background:var(--panel-2);color:var(--muted);font-weight:800;position:sticky;top:0}
+    .cd-results{font-size:12px}
+    body{color-scheme:dark}
+    body.dark{color-scheme:dark;--bg:#080d18;--panel:#101827;--panel-2:#172235;--ink:#f4f7ff;--muted:#c0cce0;--line:#2b3a51;--shadow:0 12px 32px #0006}
+    /* Theme palettes */
+    body[data-theme="midnight"]{--bg:#080d18;--panel:#101827;--panel-2:#172235;--ink:#f4f7ff;--muted:#c0cce0;--line:#2b3a51;--accent:#818cf8;--accent2:#6366f1;--accent-soft:#292d55}
+    body[data-theme="amoled"]{--bg:#000;--panel:#080808;--panel-2:#121212;--ink:#fff;--muted:#d0d0d0;--line:#303030;--accent:#38bdf8;--accent2:#0284c7;--accent-soft:#082f49}
+    body[data-theme="slate"]{--bg:#111827;--panel:#1f2937;--panel-2:#273548;--ink:#f3f4f6;--muted:#d1d5db;--line:#465569;--accent:#60a5fa;--accent2:#3b82f6;--accent-soft:#1e3a5f}
+    body[data-theme="forest"]{--bg:#071710;--panel:#0d2419;--panel-2:#153324;--ink:#effff4;--muted:#b9dfc6;--line:#2a5940;--accent:#4ade80;--accent2:#22c55e;--accent-soft:#16452b}
+    body[data-theme="purple"]{--bg:#130b20;--panel:#20132f;--panel-2:#2c1b40;--ink:#fff5ff;--muted:#e0cde9;--line:#53376a;--accent:#d8b4fe;--accent2:#c084fc;--accent-soft:#49265f}
+    body[data-theme="ocean"]{--bg:#061722;--panel:#0b2635;--panel-2:#103447;--ink:#f0fcff;--muted:#b7dce8;--line:#245366;--accent:#22d3ee;--accent2:#06b6d4;--accent-soft:#104451}
+    body[data-theme="light"]{color-scheme:light;--bg:#eef2f8;--panel:#fff;--panel-2:#f6f8fc;--ink:#172033;--muted:#52627a;--line:#d7dfeb;--accent:#4f46e5;--accent2:#4338ca;--accent-soft:#eef2ff;--good:#059669;--danger:#dc2626;--shadow:0 12px 32px #0f172a14}
+    body[data-theme="light"] #controls label{color:#334155} body[data-theme="light"] #controls details,body[data-theme="light"] #controls summary{background:var(--panel-2);color:#253149}
+    body[data-theme="light"] #controls input:not([type=checkbox]):not([type=range]):not([type=color]):not([type=file]),body[data-theme="light"] #controls select,body[data-theme="light"] #controls textarea{background:#fff;color:#172033;border-color:#d7dfeb}
+    #theme-menu{position:absolute;left:50%;bottom:82px;transform:translateX(-50%);z-index:12;display:none;grid-template-columns:repeat(4,minmax(104px,1fr));gap:6px;width:min(470px,calc(100% - 20px));padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 38px #0008;color:var(--ink)}
+    #theme-menu.open{display:grid}
+    #theme-menu .theme-option{display:flex;align-items:center;gap:7px;min-width:0;margin:0;padding:9px 8px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:9px;text-align:left;font-size:12px}
+    #theme-menu .theme-option[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}
+    #theme-menu .theme-dot{width:13px;height:13px;flex:0 0 13px;border-radius:50%;border:1px solid #ffffff55}
+    #theme-menu .theme-menu-title{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;padding:2px 3px 5px;font-size:12px;font-weight:700;color:var(--ink)}
+    #theme-menu .theme-close{padding:2px 7px;border:0;background:transparent;color:var(--muted);font-size:18px}
+    @media(max-width:480px){#theme-menu{grid-template-columns:repeat(2,minmax(0,1fr));bottom:72px;width:calc(100% - 12px)}}
+    body:not([data-theme="light"]) #controls h4{color:#d0daeb} body:not([data-theme="light"]) #controls label{color:#e2eaf8}
+    body:not([data-theme="light"]) .tool-hint,body:not([data-theme="light"]) #axis-instruction{color:#d0dced;background:var(--panel-2)}
+    body:not([data-theme="light"]) #controls button:not(.primary):not(.holographic){color:#f0f5ff;background:var(--panel-2);border-color:var(--line)}
+    body:not([data-theme="light"]) #controls button.danger{color:#fecaca;border-color:#7f3038;background:#35171c}
+    body:not([data-theme="light"]) #controls input[type=file]{color:#dce6f5;background:var(--panel-2);border-color:var(--line)}
+    body:not([data-theme="light"]) #controls summary:after{color:#c0cce0}
+    body:not([data-theme="light"]) #steps button b{background:#35445b;color:#f1f5ff}
+    body[data-theme="light"] #canvas-container{background:#fff;border-color:#dce4ef}
+    body.dark #controls{background:var(--panel);border-color:var(--line);color:var(--ink)}
+    body.dark #steps{background:var(--panel);border-color:var(--line)}
+    body.dark #steps button{background:var(--panel-2)!important;color:var(--muted)!important}
+    body.dark #steps button.on{background:#25245a!important;color:#c7d2fe!important;border-color:#4f46e5!important}
+    body.dark #controls label,body.dark #controls summary{color:#dbe5f4}
+    body.dark #controls details,body.dark #controls summary{background:var(--panel-2);border-color:var(--line)}
+    body.dark #controls input:not([type=checkbox]):not([type=range]):not([type=color]):not([type=file]),body.dark #controls select,body.dark #controls textarea{background:#0b1322;color:var(--ink);border-color:#35445c}
+    body.dark #controls button{background:#172236;color:#dbe5f4;border-color:#35445c}
+    body.dark #controls button.primary,body.dark #controls button.holographic{background:var(--accent)!important;color:white!important}
+    body.dark .tool-hint,body.dark #axis-instruction{background:#172236;color:#aab9ce}
+    body.dark #canvas-container{background:#0f172a;border-color:#29364a}
+    body.dark #controls input[type=file]{background:#0b1322;border-color:#35445c}
+    body.dark #controls input[type=file]::file-selector-button{background:#25245a;color:#c7d2fe}
+    body.dark #preview-table th,body.dark #preview-table td{border-color:var(--line)}
+    @media(max-width:900px){body{overflow:auto}#container{height:auto;min-height:100dvh;grid-template-columns:1fr;padding:8px;gap:8px}#canvas-container{height:min(62vh,650px);min-height:360px;border-radius:16px}#controls{border:1px solid var(--line);border-radius:16px;padding:14px!important;max-height:none;overflow:visible}#steps{top:-14px}#toolbar{bottom:12px}}
+    @media(max-width:480px){#container{padding:5px;gap:6px}#canvas-container{height:54vh;min-height:300px;border-radius:12px}#controls{padding:11px!important;border-radius:12px}#controls h3{font-size:19px}#toolbar{max-width:calc(100% - 12px);gap:1px;padding:4px;border-radius:11px}#toolbar button{flex-basis:39px;width:39px;font-size:16px}#toolbar button small{font-size:8px}#mode-hint{bottom:74px;font-size:10px;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis}}
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+  </style>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="container">
+    <div id="canvas-container">
+      <canvas id="canvas"></canvas>
+      <canvas id="magnifier" width="120" height="120"></canvas>
+      <div id="pick-banner">🧪 Color detection ON — hover over the graph, <b>click</b> to use the color, <b>Esc</b> to cancel</div>
+      <div id="color-tip"><span class="swatch"></span><span class="tip-text"></span></div>
+      <div id="status-bar"></div>
+      <div id="mode-hint"></div>
+      <div id="toolbar" role="toolbar" aria-label="Tools">
+        <button data-src="pan-mode" title="Pan (hold Space or toggle)">✋<small>Pan</small></button>
+        <button data-src="add-point" title="Add point (P)">＋<small>Add</small></button>
+        <button data-src="adjust-point" title="Adjust: drag a point">✥<small>Move</small></button>
+        <button data-src="delete-point" title="Delete a point">✕<small>Delete</small></button>
+        <button data-src="highlight-line" title="Trace a curve (H)">〰<small>Trace</small></button>
+        <i></i>
+        <button data-src="undo" title="Undo (Ctrl+Z)">↶<small>Undo</small></button>
+        <button data-src="redo" title="Redo (Ctrl+Y)">↷<small>Redo</small></button>
+        <i></i>
+        <button data-src="zoom-out" title="Zoom out (-)">−<small>Zoom</small></button>
+        <button data-src="zoom-in" title="Zoom in (+)">+<small>Zoom</small></button>
+        <button data-src="reset-view" title="Fit / reset view (0)">⤢<small>Fit</small></button>
+        <button data-src="toggle-theme" title="Dark / light mode">☾<small>Theme</small></button>
+      </div>
+      <div id="theme-menu" role="dialog" aria-label="Choose workspace theme">
+        <div class="theme-menu-title"><span>Workspace theme</span><button type="button" class="theme-close" id="theme-menu-close" aria-label="Close theme menu">×</button></div>
+        <button type="button" class="theme-option" data-theme-choice="midnight" aria-pressed="false"><span class="theme-dot" style="background:#818cf8"></span>Midnight</button>
+        <button type="button" class="theme-option" data-theme-choice="amoled" aria-pressed="false"><span class="theme-dot" style="background:#38bdf8"></span>AMOLED black</button>
+        <button type="button" class="theme-option" data-theme-choice="slate" aria-pressed="false"><span class="theme-dot" style="background:#60a5fa"></span>Slate blue</button>
+        <button type="button" class="theme-option" data-theme-choice="ocean" aria-pressed="false"><span class="theme-dot" style="background:#22d3ee"></span>Ocean cyan</button>
+        <button type="button" class="theme-option" data-theme-choice="forest" aria-pressed="false"><span class="theme-dot" style="background:#4ade80"></span>Forest green</button>
+        <button type="button" class="theme-option" data-theme-choice="purple" aria-pressed="false"><span class="theme-dot" style="background:#d8b4fe"></span>Violet dusk</button>
+        <button type="button" class="theme-option" data-theme-choice="light" aria-pressed="false"><span class="theme-dot" style="background:#eef2f8;border-color:#aab4c4"></span>Light mode</button>
+      </div>
+    </div>
+
+    <div id="controls" aria-label="Controls Panel">
+      <h3>Graph Digitizer Pro</h3>
+      <nav id="steps">
+        <button data-tab="setup" class="on"><b>1</b>Setup<i id="ok-setup"></i></button>
+        <button data-tab="extract"><b>2</b>Extract</button>
+        <button data-tab="data"><b>3</b>Data</button>
+      </nav>
+
+      <section class="tab-pane on" data-pane="setup">
+        <input type="file" id="image-upload" accept="image/*" title="Upload graph image">
+        <details open><summary>Calibrate axes</summary>
+          <p id="axis-instruction">Click "Set Axis Points" then enter values.</p>
+          <div class="btn-grid"><button id="set-axes" class="primary" title="Start axis calibration">Set axis points</button>
+          <button id="reset-axis-points" title="Reset axis points">Reset points</button></div>
+          <div id="axis-inputs">
+          <p class="checkbox-container">
+            <input type="checkbox" id="shared-origin" title="Use same point for X1 and Y1">
+            <label for="shared-origin">Shared Origin (X1/Y1)</label>
+          </p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="skew-axes" title="Fit a full affine transform: corrects scans where the axes are rotated or not exactly 90&deg; apart">
+            <label for="skew-axes">Skewed / rotated axes (affine fix)</label>
+          </p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="orthogonal-axes" title="Enforce orthogonal axis snapping">
+            <label for="orthogonal-axes">Orthogonal Axes</label>
+          </p>
+          <p><label for="x1-value">X1:</label> <input type="number" id="x1-value" step="any"></p>
+          <p><label for="x2-value">X2:</label> <input type="number" id="x2-value" step="any"></p>
+          <p><label for="y1-value">Y1:</label> <input type="number" id="y1-value" step="any"></p>
+          <p><label for="y2-value">Y2:</label> <input type="number" id="y2-value" step="any"></p>
+          <button id="calibrate" title="Apply calibration" disabled>Calibrate</button>
+          </div>
+
+          <!-- Polar / Ternary setup: shown instead of the X1/X2/Y1/Y2 inputs when one of them is selected
+               under "Axis type". Wired by digitizer-polar-ternary.js -->
+          <div id="cs-panel" style="display:none;">
+            <p class="tool-hint" id="cs-instruction" role="status"></p>
+
+            <div id="cs-polar" style="display:none;">
+              <h5 class="cs-title">Polar setup</h5>
+              <div class="cs-row"><label for="polar-r1">Radius at ref point (R):</label>
+                <input type="number" id="polar-r1" step="any" placeholder="e.g. 100" title="Radius value of the 2nd clicked point"></div>
+              <div class="cs-row"><label id="polar-th1-label" for="polar-th1">Angle at ref point (θ₁, °):</label>
+                <input type="number" id="polar-th1" step="any" value="0" title="Angle value of the 2nd clicked point"></div>
+              <div class="cs-row" id="polar-th2-row"><label id="polar-th2-label" for="polar-th2">Angle of 3rd point (θ₂, °):</label>
+                <input type="number" id="polar-th2" step="any" value="90" title="Angle value of the 3rd clicked point (used to detect the direction)"></div>
+              <div class="cs-row"><label for="polar-r0">Radius at center (r₀):</label>
+                <input type="number" id="polar-r0" step="any" value="0" title="0 for normal plots. Use e.g. -40 for a dB pattern whose centre ring is -40 dB"></div>
+              <div class="cs-row"><label for="polar-dir">Angle direction:</label>
+                <select id="polar-dir" title="Auto uses the 3rd clicked point to find out whether angles run clockwise or counter-clockwise">
+                  <option value="auto">Auto-detect (3 clicks)</option>
+                  <option value="ccw">Counter-clockwise (2 clicks)</option>
+                  <option value="cw">Clockwise (2 clicks)</option>
+                </select></div>
+              <div class="cs-row"><label for="polar-unit">Angle unit:</label>
+                <select id="polar-unit"><option value="deg">Degrees</option><option value="rad">Radians</option></select></div>
+              <div class="cs-row"><label for="polar-range">Angle range:</label>
+                <select id="polar-range"><option value="360">0 … 360</option><option value="180">−180 … 180</option></select></div>
+              <button id="polar-calibrate" class="primary" disabled>Calibrate polar</button>
+            </div>
+
+            <div id="cs-ternary" style="display:none;">
+              <h5 class="cs-title">Ternary setup</h5>
+              <p class="tool-hint">Name the components in the order you click the corners (corner 1 / 2 / 3).</p>
+              <div class="cs-names">
+                <input type="text" id="ternary-name-a" value="A" maxlength="24" aria-label="Component at corner 1">
+                <input type="text" id="ternary-name-b" value="B" maxlength="24" aria-label="Component at corner 2">
+                <input type="text" id="ternary-name-c" value="C" maxlength="24" aria-label="Component at corner 3">
+              </div>
+              <div class="cs-row"><label for="ternary-total">Sum of components:</label>
+                <input type="number" id="ternary-total" value="100" step="any" min="0" title="100 for percent, 1 for fractions"></div>
+              <p class="checkbox-container">
+                <input type="checkbox" id="ternary-custom">
+                <label for="ternary-custom">Corners are not 100 % (zoomed / truncated diagram)</label>
+              </p>
+              <div id="ternary-matrix" style="display:none;">
+                <p class="tool-hint">Type the composition at each clicked corner (one row per corner).</p>
+                <div class="cs-matrix">
+                  <span></span><span class="cs-h" id="tv-h-0">A</span><span class="cs-h" id="tv-h-1">B</span><span class="cs-h" id="tv-h-2">C</span>
+                  <span class="cs-r" id="tv-r-0">Corner 1</span>
+                  <input type="number" id="tv-0-0" step="any"><input type="number" id="tv-0-1" step="any"><input type="number" id="tv-0-2" step="any">
+                  <span class="cs-r" id="tv-r-1">Corner 2</span>
+                  <input type="number" id="tv-1-0" step="any"><input type="number" id="tv-1-1" step="any"><input type="number" id="tv-1-2" step="any">
+                  <span class="cs-r" id="tv-r-2">Corner 3</span>
+                  <input type="number" id="tv-2-0" step="any"><input type="number" id="tv-2-1" step="any"><input type="number" id="tv-2-2" step="any">
+                </div>
+              </div>
+              <button id="ternary-calibrate" class="primary" disabled>Calibrate ternary</button>
+            </div>
+
+            <div class="cs-actions">
+              <button id="cs-undo-point" type="button" disabled>↶ Remove last point</button>
+            </div>
+            <p class="tool-hint" id="cs-status" role="status"></p>
+          </div>
+
+          <div class="btn-grid"><button id="reset-calibration" title="Clear calibration">Reset calibration</button>
+          <button id="toggle-grid" title="Show/hide overlay grid">Grid</button></div>
+        </details>
+        <details><summary>Axis type (log / date / polar / ternary)</summary>
+          <div class="btn-grid">
+            <button id="toggle-log-x" title="Toggle X-axis log scale">Log X</button>
+            <button id="toggle-log-y" title="Toggle Y-axis log scale">Log Y</button>
+            <button id="toggle-date-x" title="Treat the X axis as dates">Date X</button>
+            <button id="toggle-date-y" title="Treat the Y axis as dates">Date Y</button>
+            <button id="toggle-polar" title="Polar graph: angle + radius. Its setup appears in Calibrate axes">Polar</button>
+            <button id="toggle-ternary" title="Ternary graph: three components that add up to a constant. Its setup appears in Calibrate axes">Ternary</button>
+          </div>
+          <div id="date-x-options" style="display:none;">
+          <p class="inline-row"><label for="date-unit-x">X data point =</label>
+            <select id="date-unit-x" title="Round every X value to the nearest day, month or year">
+              <option value="day">Day</option><option value="month">Month</option><option value="year">Year</option>
+            </select></p>
+          </div>
+          <div id="date-y-options" style="display:none;">
+          <p class="inline-row"><label for="date-unit-y">Y data point =</label>
+            <select id="date-unit-y" title="Round every Y value to the nearest day, month or year">
+              <option value="day">Day</option><option value="month">Month</option><option value="year">Year</option>
+            </select></p>
+          </div>
+        </details>
+        <details>
+        <summary>✨ Image Enhancements</summary>
+        <p class="slider-row">
+          <label>Brightness: <span id="brightness-val">100%</span></label>
+          <input type="range" id="brightness-slider" min="10" max="300" value="100" title="Adjust image brightness">
+        </p>
+        <p class="slider-row">
+          <label>Contrast: <span id="contrast-val">100%</span></label>
+          <input type="range" id="contrast-slider" min="10" max="400" value="100" title="Adjust image contrast">
+        </p>
+      </details>
+        <details><summary>View</summary><p>Magnifier Zoom:
+          <input type="range" id="magnifier-zoom" min="1" max="10" step="0.5" value="2" title="Magnifier zoom level">
+        </p></details>
+      </section>
+
+      <section class="tab-pane" data-pane="extract">
+        <p class="tool-hint" id="calib-warn">⚠ Calibrate the axes first (Setup tab).</p>
+        <h4>Line management</h4>
+        <div class="line-bar">
+          <select id="line-select" title="Select active line"></select>
+          <button id="new-line" title="Create a new data line" disabled>＋ New</button>
+          <button id="rename-line" title="Rename the current line" disabled>Rename</button>
+        </div>
+        <h4>Point actions</h4>
+        <div class="btn-grid">
+          <button id="add-point" title="Click canvas to add a point (P)" disabled>＋ Add point</button>
+          <button id="adjust-point" title="Drag a point to reposition it" disabled>✥ Adjust point</button>
+          <button id="delete-point" title="Click a point to delete it" disabled>✕ Delete point</button>
+          <button id="highlight-line" title="Hold left-click and drag to trace a curve (H)" disabled>〰 Highlight line</button>
+        </div>
+        <p class="tool-hint">Highlight mode: drag along a curve to trace it. Its options (name, points, snap, Auto Smooth) appear below once it's on.</p>
+        <div id="proxy-src">
+          <button id="pan-mode"></button>
+          <button id="undo" disabled></button><button id="redo" disabled></button><button id="zoom-in"></button><button id="zoom-out"></button><button id="reset-view"></button><button id="toggle-theme"></button>
+        </div>
+        <div id="highlight-controls">
+          <p>Line Name: <input type="text" id="highlight-line-name" placeholder="Enter line name"></p>
+          <p>Points (n): <input type="number" id="n-points" value="20" min="2"></p>
+          <p>Brush Width: <input type="range" id="highlight-width" min="1" max="20" value="3"></p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="auto-trace-toggle" checked
+              title="After tracing, detect line color from path and snap all points to nearest matching pixel — ignores grid lines">
+            <label for="auto-trace-toggle">🎯 Auto-Trace (color snap)</label>
+          </p>
+          <p class="checkbox-container">
+            <input type="checkbox" id="grid-filter-toggle" title="Highlight mode only: suppress background grid lines (the image is filtered while Highlight Line is active, and auto-trace samples the filtered image)">
+            <label for="grid-filter-toggle">Grid Filter (suppress grids)</label>
+          </p>
+
+          <p class="checkbox-container">
+            <input type="checkbox" id="snap-toggle" title="Highlight mode only: snap traced points to the nearest matching pixel (line) within a small radius">
+            <label for="snap-toggle">🧲 Snap to Pixel (Magnet)</label>
+          </p>
+
+          <div id="snap-options">
+            <p class="inline-row">
+              <label for="snap-mode">Snap to:</label>
+              <select id="snap-mode" title="What the magnet should snap to">
+                <option value="dark">Dark pixels (default)</option>
+                <option value="custom">Chosen color</option>
+              </select>
+            </p>
+            <div id="snap-custom-options" style="display:none;">
+              <p class="inline-row">
+                <label for="snap-color">Color:</label>
+                <input type="color" id="snap-color" value="#ff0000" title="Click the square to choose the color to snap to">
+                <button id="snap-pick" title="Eyedropper: hover over the graph to preview a color, click to use it (Esc cancels)">🧪 Detect color</button>
+              </p>
+              <p class="inline-row" id="snap-live-row">
+                <span id="snap-live" class="swatch" title="Color under the pointer while detecting"></span>
+                <span id="snap-live-hex">Hover over the graph while detecting…</span>
+              </p>
+              <p class="slider-row">
+                <label>Tolerance: <span id="snap-tol-val">60</span></label>
+                <input type="range" id="snap-tol" min="5" max="200" value="60" title="Higher = accepts colors further from the chosen one">
+              </p>
+            </div>
+          </div>
+
+          <button id="delete-highlight" title="Clear the current highlight path">Delete Highlight</button>
+
+          <hr>
+          <button id="smooth-toggle" class="holographic" title="Preview and apply smoothing to the current line (needs at least 3 points)" disabled>〰️ Auto Smooth Line</button>
+          <div id="smooth-panel" class="tool-panel">
+            <p class="tool-hint">Cyan = smoothed result, dashed white = your original line. Tune the sliders, then press Apply (Ctrl+Z undoes it, Esc cancels).</p>
+            <p class="inline-row">
+              <label for="smooth-method">Method:</label>
+              <select id="smooth-method" title="Smoothing algorithm">
+                <option value="spline">Smoothing spline (very smooth)</option>
+                <option value="gaussian">Gaussian (soft, general)</option>
+                <option value="savgol">Savitzky-Golay (keeps peaks)</option>
+              </select>
+            </p>
+            <p class="slider-row">
+              <label>Strength: <span id="smooth-strength-val">6 px</span></label>
+              <input type="range" id="smooth-strength" min="1" max="200" step="1" value="6" title="Larger = smoother (measured in image pixels)">
+            </p>
+            <p class="checkbox-container">
+              <input type="checkbox" id="smooth-keep-ends" checked>
+              <label for="smooth-keep-ends">Keep start / end points fixed</label>
+            </p>
+            <p class="checkbox-container">
+              <input type="checkbox" id="smooth-corners" title="Sharp corners are kept sharp and each piece between corners is smoothed separately">
+              <label for="smooth-corners">Keep sharp corners</label>
+            </p>
+            <div id="smooth-corner-row" style="display:none;">
+              <p class="slider-row">
+                <label>Corner sharpness: <span id="smooth-corner-angle-val">45°</span></label>
+                <input type="range" id="smooth-corner-angle" min="20" max="120" step="5" value="45" title="Minimum turning angle that counts as a corner">
+              </p>
+            </div>
+            <p class="slider-row">
+              <label>Max distance from original: <span id="smooth-maxdev-val">Off</span></label>
+              <input type="range" id="smooth-maxdev" min="0" max="40" step="1" value="0" title="0 = no limit. Otherwise the result is never pulled further than this from your line">
+            </p>
+            <p class="checkbox-container">
+              <input type="checkbox" id="smooth-despike" title="Removes single stray points that jump out and straight back">
+              <label for="smooth-despike">Remove stray points (misclicks)</label>
+            </p>
+            <p class="checkbox-container">
+              <input type="checkbox" id="smooth-keep-count" checked>
+              <label for="smooth-keep-count">Keep same number of points</label>
+            </p>
+            <p><label for="smooth-n">Output points:</label> <input type="number" id="smooth-n" value="20" min="2" max="5000"></p>
+            <p class="tool-hint" id="smooth-info" role="status"></p>
+            <div class="inline-row">
+              <button id="smooth-apply" disabled>✔ Apply</button>
+              <button id="smooth-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <div class="btn-grid">
+          <button id="sort-points" title="Sort points by X coordinate" disabled>Sort by X</button>
+          <button id="clear-points" title="Clear all points in current line" disabled>Clear points</button>
+        </div>
+        <h4>Auto-detect</h4>
+        <details>
+        <summary>Curve / Scatter Detector</summary>
+        <p class="tool-hint">Detect separate curve components or scatter markers. Results are listed below so you can name and color each dataset before adding it.</p>
+        <p><label for="cd-mode">Detection type:</label>
+          <select id="cd-mode">
+            <option value="curves">Separate curve components</option>
+            <option value="scatter">Scatter markers (one dataset)</option>
+          </select>
+        </p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-suppress-lines" checked><label for="cd-suppress-lines">Suppress long horizontal / vertical lines</label></p>
+        <p class="slider-row"><label>Line suppression threshold: <span id="cd-run-val">18%</span></label><input type="range" id="cd-run" min="8" max="35" value="18"></p>
+        <p class="slider-row"><label>Foreground sensitivity: <span id="cd-sensitivity-val">Medium</span></label><input type="range" id="cd-sensitivity" min="1" max="3" value="2"></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-split-colors" checked title="Curve mode: split lines of different colors even when they cross or touch"><label for="cd-split-colors">Separate curves by color</label></p>
+        <p class="slider-row"><label>Color separation distance: <span id="cd-split-val">60</span></label><input type="range" id="cd-split-dist" min="20" max="150" value="60" title="Lower = treats similar colors as different lines. Higher = merges similar colors."></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-ignore-gray" checked title="Curve mode: drop light gray / low-saturation colors (typical grid lines, axes shading). Untick if your curve itself is gray."><label for="cd-ignore-gray">Ignore gray (grid-like) colors</label></p>
+        <p class="slider-row"><label>Minimum curve width: <span id="cd-minw-val">15</span>% of plot</label><input type="range" id="cd-minw" min="1" max="80" value="15" title="Drops short fragments such as text, ticks and legend samples"></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-limit-bounds" checked title="Ignore everything outside the rectangle spanned by your axis points (titles, legends, labels)"><label for="cd-limit-bounds">Only search inside the axis-point area</label></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-filter-color"><label for="cd-filter-color">Detect only a selected color</label></p>
+        <p class="inline-row"><label for="cd-color">Target color:</label><input type="color" id="cd-color" value="#ff0000" title="Color to detect"><span id="cd-color-chip" class="swatch" style="background:#ff0000" aria-label="Selected target color"></span></p>
+        <button id="cd-pick-color" type="button" title="Click, then click a color on the graph to sample it">🧪 Pick color from graph</button>
+        <p class="tool-hint" id="cd-pick-help">Choose a target color with the color square or sample one directly from the graph.</p>
+        <p class="slider-row"><label>Color tolerance: <span id="cd-tol-val">55</span></label><input type="range" id="cd-tol" min="5" max="220" value="55"></p>
+        <p>Minimum component size (pixels): <input type="number" id="cd-min-size" min="1" max="100000" value="35"></p>
+        <p><label id="cd-points-label" for="cd-points">Points per curve / dataset:</label> <input type="number" id="cd-points" min="2" max="5000" value="100"></p>
+        <p class="checkbox-container"><input type="checkbox" id="cd-preview" checked><label for="cd-preview">Preview detected components</label></p>
+        <button id="cd-detect" class="holographic" disabled>Detect Curves / Markers</button>
+        <button id="cd-add-results" disabled>Add Named Datasets</button>
+        <button id="cd-clear-preview">Clear Detector Preview</button>
+        <div id="cd-results" class="cd-results" aria-live="polite"></div>
+        <p id="cd-status" class="tool-hint" role="status">Upload an image and calibrate axes to detect curves.</p>
+      </details>
+        <details>
+        <summary>Table / Grid / Text Extractor (OCR)</summary>
+        <p class="tool-hint">
+          Extract numbers, words and table/grid structures from the image.
+          Results can be reviewed, named and then exported cleanly to Excel.
+        </p>
+
+        <p>
+          <label for="te-lang">Language:</label>
+          <select id="te-lang" title="OCR language pack">
+            <option value="eng">English</option>
+            <option value="eng+deu">English + German</option>
+            <option value="eng+fra">English + French</option>
+            <option value="eng+spa">English + Spanish</option>
+            <option value="eng+ita">English + Italian</option>
+            <option value="eng+por">English + Portuguese</option>
+          </select>
+        </p>
+
+        <p class="slider-row">
+          <label>Min confidence: <span id="te-min-conf-val">45</span></label>
+          <input type="range" id="te-min-conf" min="15" max="90" value="45"
+                 title="Ignore low-confidence OCR results">
+        </p>
+
+        <p class="checkbox-container">
+          <input type="checkbox" id="te-detect-numbers" checked>
+          <label for="te-detect-numbers">Detect numbers</label>
+        </p>
+        <p class="checkbox-container">
+          <input type="checkbox" id="te-detect-words" checked>
+          <label for="te-detect-words">Detect words / labels</label>
+        </p>
+        <p class="checkbox-container">
+          <input type="checkbox" id="te-detect-grid" checked>
+          <label for="te-detect-grid">Detect table / grid structure</label>
+        </p>
+
+        <p class="checkbox-container">
+          <input type="checkbox" id="te-manual-grid">
+          <label for="te-manual-grid">Manual grid mode (draw cell lines)</label>
+        </p>
+        <p class="tool-hint">Tick it, then click two dots per line – each pair becomes a horizontal or vertical cell border (it snaps to whichever direction is closer). Untick it and every word/number is placed in the cell enclosed by your lines. Lines only need to cover the cells they border.</p>
+        <div class="inline-row">
+          <button id="te-manual-undo" disabled>Undo Dot</button>
+          <button id="te-manual-clear" disabled>Clear Lines</button>
+        </div>
+
+        <p class="checkbox-container">
+          <input type="checkbox" id="te-preview" checked>
+          <label for="te-preview">Preview detected items on graph</label>
+        </p>
+
+        <button id="te-detect" class="holographic" disabled>Detect Tables / Numbers / Text</button>
+        <button id="te-add-results" disabled>Add Named Datasets</button>
+        <button id="te-clear-preview">Clear OCR Preview</button>
+        <button id="te-export-xlsx" title="Export only the OCR results as an Excel file" disabled>Export OCR to Excel</button>
+
+        <div id="te-results" class="cd-results" aria-live="polite"></div>
+        <p id="te-status" class="tool-hint" role="status">
+          Upload an image, then run detection. Tables will be exported as proper Excel sheets.
+        </p>
+      </details>
+      </section>
+
+      <section class="tab-pane" data-pane="data">
+        <input type="file" id="import-json-input" accept=".json" style="display:none">
+        <h4>Export</h4>
+        <div class="btn-grid">
+          <button id="export-csv" class="primary" title="Export data as CSV">CSV</button>
+          <button id="export-xlsx" class="primary" title="Export data as Excel">XLSX</button>
+          <button id="export-json" title="Export data as JSON">JSON</button>
+          <button id="export-image" title="Export canvas as PNG">PNG image</button>
+        </div>
+        <h4>Session</h4>
+        <div class="btn-grid">
+          <button id="import-json" title="Import JSON session">Import JSON</button>
+          <button id="clear-session" class="danger" title="Clear all data and calibration">Clear session</button>
+        </div>
+        <details open><summary>Points (current line)</summary><div id="point-list"></div></details>
+        <details>
+        <summary>Preview Data</summary>
+        <div style="max-height:200px;overflow-y:auto;">
+          <table id="preview-table"></table>
+        </div>
+      </details>
+      </section>
+    </div>
+  </div>
+
+  <div id="modal"><div id="modal-content"></div></div>
+  <div id="spinner">Processing…</div>
+
+  <!-- Core must load first: state, drawing, calibration, session -->
+  <script src="digitizer-core.js"></script>
+  <!-- Tools: interactions, auto-trace, snap, export -->
+  <script src="digitizer-tools.js"></script>
+  <!-- Polar + Ternary coordinate systems (needs core + tools; loaded before the other add-ons) -->
+  <script src="digitizer-polar-ternary.js"></script>
+  <!-- Smoother: Auto Smooth panel inside Highlight Line (needs core + tools) -->
+  <script src="digitizer-smoother.js"></script>
+  <script src="digitizer-curve-detector.js"></script>
+  <script src="digitizer-table-ocr.js"></script>
+  <script>(() => {
+  const $ = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)];
+  const tabs = all('#steps button'), panes = all('.tab-pane');
+  const show = t => { tabs.forEach(b => b.classList.toggle('on', b.dataset.tab === t)); panes.forEach(p => p.classList.toggle('on', p.dataset.pane === t)); };
+  tabs.forEach(b => b.addEventListener('click', () => show(b.dataset.tab)));
+  const tb = all('#toolbar button[data-src]');
+  tb.forEach(b => b.addEventListener('click', () => { const s = document.getElementById(b.dataset.src); if (b.dataset.src === 'toggle-theme') { const menu = document.getElementById('theme-menu'); menu?.classList.toggle('open'); return; } if (s && !s.disabled) s.click(); }));
+  const hints = { axes: 'Click the graph to place axis points', add: 'Click to add a point · P', adjust: 'Drag a point to move it',
+    delete: 'Click a point to delete it', highlight: 'Drag along the curve to trace it · H' };
+  let wasCal = false;
+  const themeMenu = document.getElementById('theme-menu');
+  const themeOptions = all('[data-theme-choice]');
+  const applyTheme = theme => {
+    const valid = ['midnight','amoled','slate','ocean','forest','purple','light'];
+    if (!valid.includes(theme)) theme = 'midnight';
+    document.body.dataset.theme = theme;
+    document.body.classList.toggle('dark', theme !== 'light');
+    themeOptions.forEach(option => option.setAttribute('aria-pressed', String(option.dataset.themeChoice === theme)));
+    try { localStorage.setItem('graphDigitizerTheme', theme); } catch (e) {}
+  };
+  let savedTheme = 'midnight';
+  try { savedTheme = localStorage.getItem('graphDigitizerTheme') || 'midnight'; } catch (e) {}
+  applyTheme(savedTheme);
+  themeOptions.forEach(option => option.addEventListener('click', () => { applyTheme(option.dataset.themeChoice); themeMenu?.classList.remove('open'); }));
+  document.getElementById('theme-menu-close')?.addEventListener('click', () => themeMenu?.classList.remove('open'));
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') themeMenu?.classList.remove('open'); });
+  document.addEventListener('click', event => { if (themeMenu?.classList.contains('open') && !themeMenu.contains(event.target) && !event.target.closest('#toolbar [data-src="toggle-theme"]')) themeMenu.classList.remove('open'); });
+  setInterval(() => {
+    tb.forEach(b => { const s = document.getElementById(b.dataset.src); if (!s) return;
+      b.disabled = s.disabled; b.classList.toggle('active', s.classList.contains('active')); });
+    let cal = false, m = 'none';
+    try { cal = !!isCalibrated; m = mode; } catch (e) {}
+    const h = $('#mode-hint'), t = hints[m];
+    h.style.display = t ? 'block' : 'none'; if (t) h.textContent = t;
+    $('#ok-setup').textContent = cal ? '✓' : '';
+    $('#calib-warn').style.display = cal ? 'none' : 'block';
+    if (cal && !wasCal) show('extract');
+    wasCal = cal;
+  }, 200);
+})();
+</script>
+</body>
+</html>
